@@ -43,7 +43,7 @@ unsigned long action_DebounceDelay = 50;
 int enc_Ticks_Per_Rot = 961;
 const int TRANSLATE_MAX_SPEED = 300; //RPM for moving motors
 
-//Velocity PID #####################################
+//Velocity PID ##########################################################
 long int prev_Vel_PID_Time = millis();
 int prev_M1_enc_Pos = 0;
 int prev_M2_enc_Pos = 0;
@@ -57,6 +57,16 @@ PID M2_Vel_PID(&M2_Vel_input, &M2_Vel_output, &M2_Vel_setpoint, Vel_Kp, Vel_Ki, 
 
 double M1_Vel_Save;
 double M2_Vel_Save;
+
+//Position PID################################################################# 
+//input = position from encoders, output = setpoint for Velocity PID (range from -300 to 300), setpoint = targets on the track
+double M1_Pos_input, M1_Pos_output, M1_Pos_setpoint;
+double M2_Pos_input, M2_Pos_output, M2_Pos_setpoint;
+double Pos_Kp = 0.4, Pos_Ki = 2, Pos_Kd = 0;
+
+PID M1_Pos_PID(&M1_Pos_input, &M1_Pos_output, &M1_Pos_setpoint, Pos_Kp, Pos_Ki, Pos_Kd, DIRECT);
+PID M2_Pos_PID(&M2_Pos_input, &M2_Pos_output, &M2_Pos_setpoint, Pos_Kp, Pos_Ki, Pos_Kd, DIRECT);
+
 
 //temporary variables used for testing purposes
 int loopNo = 0;
@@ -158,7 +168,24 @@ void DCMotorTest(){
   digitalWrite(M2_IN2, LOW);
 }
 
-void RunPIDCalculation(){
+
+void PosPIDCalculation(){
+
+  //set Pos PID input to encoder values
+  M1_Pos_input = M1_encoderPos;
+  M2_Pos_input = M2_encoderPos;
+
+  //compute PID output
+  M1_Pos_PID.Compute();
+  M2_Pos_PID.Compute();
+
+  //set Vel PID setpoint to Pos PID output
+  M1_Vel_setpoint = M1_Pos_output;
+  M2_Vel_setpoint = M2_Pos_output;
+}
+
+void VelPIDCalculation(){
+  //velocuty PID
   //calculate time passed
   long int current_Time = millis();
   int time_Passed = current_Time - prev_Vel_PID_Time;
@@ -311,11 +338,19 @@ void setup() {
   M1_Vel_PID.SetOutputLimits(-230, 230);
   M2_Vel_PID.SetOutputLimits(-230, 230);
 
+  M1_Pos_PID.SetMode(AUTOMATIC);
+  M2_Pos_PID.SetMode(AUTOMATIC);
+  M1_Pos_PID.SetOutputLimits(-TRANSLATE_MAX_SPEED, TRANSLATE_MAX_SPEED);
+  M2_Pos_PID.SetOutputLimits(-TRANSLATE_MAX_SPEED, TRANSLATE_MAX_SPEED);
+
   //Action button setup
   pinMode(ACTION_BUTTON_PIN, INPUT);
 
   M1_Vel_setpoint = 0;
   M1_Vel_setpoint = 0;
+
+  M1_Pos_setpoint = 0;
+  M2_Pos_setpoint = 0;
 }
 
 void loop() {
@@ -323,11 +358,12 @@ void loop() {
     actionButtonWait();
 
     //PID target for testing
-    M1_Vel_setpoint = testTargetVelPID;
-    M2_Vel_setpoint = testTargetVelPID;
+    M1_Pos_setpoint = 7*enc_Ticks_Per_Rot;
+    M2_Pos_setpoint = 7*enc_Ticks_Per_Rot;
   }
 
-  RunPIDCalculation();
+  PosPIDCalculation();
+  VelPIDCalculation();
 
   // delay(100);
   loopNo++;
