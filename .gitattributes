@@ -1,0 +1,5 @@
+# Enforce LF endings for all text files
+* text=auto
+
+# Set specific behavior for C/C++ header files
+*.h text eol=lf
