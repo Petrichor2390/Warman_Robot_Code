@@ -41,6 +41,7 @@ unsigned long action_DebounceDelay = 50;
 
 //characteristic motor variables
 int enc_Ticks_Per_Rot = 961;
+const int TRANSLATE_MAX_SPEED = 300; //RPM for moving motors
 
 //Velocity PID #####################################
 long int prev_Vel_PID_Time = millis();
@@ -49,7 +50,7 @@ int prev_M2_enc_Pos = 0;
 
 double M1_Vel_input, M1_Vel_output, M1_Vel_setpoint;
 double M2_Vel_input, M2_Vel_output, M2_Vel_setpoint;
-double Vel_Kp = 1, Vel_Ki = 0, Vel_Kd = 0;
+double Vel_Kp = 0.4, Vel_Ki = 2, Vel_Kd = 0;
 
 PID M1_Vel_PID(&M1_Vel_input, &M1_Vel_output, &M1_Vel_setpoint, Vel_Kp, Vel_Ki, Vel_Kd, DIRECT);
 PID M2_Vel_PID(&M2_Vel_input, &M2_Vel_output, &M2_Vel_setpoint, Vel_Kp, Vel_Ki, Vel_Kd, DIRECT);
@@ -59,7 +60,7 @@ double M2_Vel_Save;
 
 //temporary variables used for testing purposes
 int loopNo = 0;
-double testTargetVelPID = 450;
+double testTargetVelPID = 300;
 
 //M1 interupts
 void IRAM_ATTR M1handleEncoderA() {
@@ -307,8 +308,8 @@ void setup() {
   //PID SETUP
   M1_Vel_PID.SetMode(AUTOMATIC);
   M2_Vel_PID.SetMode(AUTOMATIC);
-  M1_Vel_PID.SetOutputLimits(-254, 254);
-  M2_Vel_PID.SetOutputLimits(-254, 254);
+  M1_Vel_PID.SetOutputLimits(-230, 230);
+  M2_Vel_PID.SetOutputLimits(-230, 230);
 
   //Action button setup
   pinMode(ACTION_BUTTON_PIN, INPUT);
