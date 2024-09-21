@@ -58,6 +58,18 @@ PID M2_Vel_PID(&M2_Vel_input, &M2_Vel_output, &M2_Vel_setpoint, Vel_Kp, Vel_Ki, 
 double M1_Vel_Save;
 double M2_Vel_Save;
 
+//rolling average velocity
+const int roll_N = 10;
+double M1_Rolling_Avg_Vel_Sum = 0;
+double M2_Rolling_Avg_Vel_Sum = 0;
+double M1_Rolling_Avg_Vel_Values[roll_N];
+double M2_Rolling_Avg_Vel_Values[roll_N];
+double M1_Rolling_Avg_Vel = 0;
+double M2_Rolling_Avg_Vel = 0;
+int roll_Index = 0;
+bool roll_Avg_Filled = false;
+
+
 //Position PID################################################################# 
 //input = position from encoders, output = setpoint for Velocity PID (range from -300 to 300), setpoint = targets on the track
 double M1_Pos_input, M1_Pos_output, M1_Pos_setpoint;
@@ -66,6 +78,9 @@ double Pos_Kp = 0.3, Pos_Ki = 0.1, Pos_Kd = 0;
 
 PID M1_Pos_PID(&M1_Pos_input, &M1_Pos_output, &M1_Pos_setpoint, Pos_Kp, Pos_Ki, Pos_Kd, DIRECT);
 PID M2_Pos_PID(&M2_Pos_input, &M2_Pos_output, &M2_Pos_setpoint, Pos_Kp, Pos_Ki, Pos_Kd, DIRECT);
+
+
+
 
 
 //temporary variables used for testing purposes
@@ -169,19 +184,25 @@ void DCMotorTest(){
 }
 
 
-void PosPIDCalculation(){
+void PosPIDCalculation(bool bypass = false){
 
-  //set Pos PID input to encoder values
-  M1_Pos_input = M1_encoderPos;
-  M2_Pos_input = M2_encoderPos;
+  if(!bypass){ //standard operation
+    //set Pos PID input to encoder values
+    M1_Pos_input = M1_encoderPos;
+    M2_Pos_input = M2_encoderPos;
 
-  //compute PID output
-  M1_Pos_PID.Compute();
-  M2_Pos_PID.Compute();
+    //compute PID output
+    M1_Pos_PID.Compute();
+    M2_Pos_PID.Compute();
 
-  //set Vel PID setpoint to Pos PID output
-  M1_Vel_setpoint = M1_Pos_output;
-  M2_Vel_setpoint = M2_Pos_output;
+    //set Vel PID setpoint to Pos PID output
+    M1_Vel_setpoint = M1_Pos_output;
+    M2_Vel_setpoint = M2_Pos_output;
+  }else{
+    //used for testing velocity PID
+    M1_Vel_setpoint = testTargetVelPID;
+    M2_Vel_setpoint = testTargetVelPID;
+  }
 }
 
 void VelPIDCalculation(){
@@ -294,6 +315,35 @@ void actionButtonWait(){
 
 }
 
+void calcRollingAvg(){
+  // Subtract the oldest value from the sum
+  M1_Rolling_Avg_Vel_Sum -= M1_Rolling_Avg_Vel_Values[roll_Index];
+  M2_Rolling_Avg_Vel_Sum -= M2_Rolling_Avg_Vel_Values[roll_Index];
+
+  // Add the new value to the array and the sum
+  M1_Rolling_Avg_Vel_Values[roll_Index] = M1_Vel_Save;
+  M2_Rolling_Avg_Vel_Values[roll_Index] = M2_Vel_Save;
+  M1_Rolling_Avg_Vel_Sum += M1_Vel_Save;
+  M2_Rolling_Avg_Vel_Sum += M2_Vel_Save;
+
+  roll_Index = (roll_Index + 1) % roll_N;
+
+  if (roll_Index == 0) {
+    roll_Avg_Filled = true;
+  }
+
+  if (roll_Avg_Filled) {
+    M1_Rolling_Avg_Vel =  M1_Rolling_Avg_Vel_Sum/roll_N;
+    M2_Rolling_Avg_Vel =  M2_Rolling_Avg_Vel_Sum/roll_N;
+  } else {
+    M1_Rolling_Avg_Vel =  M1_Rolling_Avg_Vel_Sum/(roll_Index + 1);
+    M2_Rolling_Avg_Vel =  M2_Rolling_Avg_Vel_Sum/(roll_Index + 1);
+  }
+
+
+
+}
+
 
 void setup() {
   Serial.begin(115200);
@@ -351,9 +401,19 @@ void setup() {
 
   M1_Pos_setpoint = 0;
   M2_Pos_setpoint = 0;
+
+  //rolling average velocity calculation
+  // Initialize the array with zeros
+  for (int i = 0; i < roll_N; i++) {
+    M1_Rolling_Avg_Vel_Values[i] = 0;
+    M2_Rolling_Avg_Vel_Values[i] = 0;
+  }
+
+
 }
 
 void loop() {
+  calcRollingAvg();
   if(loopNo==0){
     actionButtonWait();
 
@@ -362,7 +422,7 @@ void loop() {
     M2_Pos_setpoint = 7*enc_Ticks_Per_Rot;
   }
 
-  PosPIDCalculation();
+  PosPIDCalculation(true); //bypass = true - skipping for vel pid calc
   VelPIDCalculation();
 
   // delay(100);
