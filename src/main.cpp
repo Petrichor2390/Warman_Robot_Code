@@ -42,6 +42,11 @@ unsigned long action_DebounceDelay = 50;
 //characteristic motor variables
 int enc_Ticks_Per_Rot = 961;
 const int TRANSLATE_MAX_SPEED = 300; //RPM for moving motors
+//max acceleration for motors - post PID
+double max_Acceleration = 10; //max change in PWM value output to the motors
+double low_Speed_Acceleration = 1;
+double low_Speed_Cutoff_ForAcceleration_Top = 100;
+double low_Speed_Cutoff_ForAcceleration_Bottom = 50;
 
 //Velocity PID ##########################################################
 long int prev_Vel_PID_Time = millis();
@@ -50,13 +55,20 @@ int prev_M2_enc_Pos = 0;
 
 double M1_Vel_input, M1_Vel_output, M1_Vel_setpoint;
 double M2_Vel_input, M2_Vel_output, M2_Vel_setpoint;
-double Vel_Kp = 0.4, Vel_Ki = 2, Vel_Kd = 0;
+double Vel_Kp = 1.5, Vel_Ki = 0.8, Vel_Kd = 0.05; //0.15
 
 PID M1_Vel_PID(&M1_Vel_input, &M1_Vel_output, &M1_Vel_setpoint, Vel_Kp, Vel_Ki, Vel_Kd, DIRECT);
 PID M2_Vel_PID(&M2_Vel_input, &M2_Vel_output, &M2_Vel_setpoint, Vel_Kp, Vel_Ki, Vel_Kd, DIRECT);
 
 double M1_Vel_Save;
 double M2_Vel_Save;
+
+double M1_Prev_PWM_Output = 0;
+double M2_Prev_PWM_Output = 0;
+
+double M1_Current_PWM = 0;
+double M2_Current_PWM = 0;
+
 
 //rolling average velocity
 const int roll_N = 10;
@@ -78,9 +90,6 @@ double Pos_Kp = 0.3, Pos_Ki = 0.1, Pos_Kd = 0;
 
 PID M1_Pos_PID(&M1_Pos_input, &M1_Pos_output, &M1_Pos_setpoint, Pos_Kp, Pos_Ki, Pos_Kd, DIRECT);
 PID M2_Pos_PID(&M2_Pos_input, &M2_Pos_output, &M2_Pos_setpoint, Pos_Kp, Pos_Ki, Pos_Kd, DIRECT);
-
-
-
 
 
 //temporary variables used for testing purposes
@@ -214,72 +223,103 @@ void VelPIDCalculation(){
   //avoid div 0 and too small increments
   if (time_Passed < 10) {
     return; 
-  }
+  }else{
+    prev_Vel_PID_Time = current_Time;
 
-  prev_Vel_PID_Time = current_Time;
+    int M1_deltaEncPos = M1_encoderPos - prev_M1_enc_Pos;
+    int M2_deltaEncPos = M2_encoderPos - prev_M2_enc_Pos;
 
-  int M1_deltaEncPos = M1_encoderPos - prev_M1_enc_Pos;
-  int M2_deltaEncPos = M2_encoderPos - prev_M2_enc_Pos;
+    // Serial.print("time_Passed: ");
+    // Serial.println(time_Passed);
 
-  // Serial.print("time_Passed: ");
-  // Serial.println(time_Passed);
+    // Serial.print("M1_deltaEncPos: ");
+    // Serial.println(M1_deltaEncPos);
 
-  // Serial.print("M1_deltaEncPos: ");
-  // Serial.println(M1_deltaEncPos);
+    //set prev enc pos
+    prev_M1_enc_Pos = M1_encoderPos;
+    prev_M2_enc_Pos = M2_encoderPos;
 
-  //set prev enc pos
-  prev_M1_enc_Pos = M1_encoderPos;
-  prev_M2_enc_Pos = M2_encoderPos;
-
-  //calculate vel and convert from enc ticks/ms to rotations/s
-  double M1_Vel = ((double)M1_deltaEncPos / time_Passed) * 1000 * 60 / enc_Ticks_Per_Rot;
-  double M2_Vel = ((double)M2_deltaEncPos / time_Passed) * 1000 * 60 / enc_Ticks_Per_Rot;
+    //calculate vel and convert from enc ticks/ms to rotations/s
+    double M1_Vel = ((double)M1_deltaEncPos / time_Passed) * 1000 * 60 / enc_Ticks_Per_Rot;
+    double M2_Vel = ((double)M2_deltaEncPos / time_Passed) * 1000 * 60 / enc_Ticks_Per_Rot;
 
 
-  //saving vel for print and data logging
-  M1_Vel_Save = M1_Vel;
-  M2_Vel_Save = M2_Vel;
-  
-  //calculate pid output values
-  M1_Vel_input = M1_Vel;
-  M2_Vel_input = M2_Vel;
-  M1_Vel_PID.Compute();
-  M2_Vel_PID.Compute();
-
-  //M1 motor controll logic
-  if (M1_Vel_output > 0) {
-    digitalWrite(M1_IN1, HIGH);
-    digitalWrite(M1_IN2, LOW);
-  } else if (M1_Vel_output < 0) {
-    digitalWrite(M1_IN1, LOW);
-    digitalWrite(M1_IN2, HIGH);
-  }
-  // Set motor speed (output should be PWM signal to ENA)
-  analogWrite(M1_EN, int(abs(M1_Vel_output)));
+    //saving vel for print and data logging
+    M1_Vel_Save = M1_Vel;
+    M2_Vel_Save = M2_Vel;
     
-  //M2 motor control logic
-  if (M2_Vel_output > 0) {
-    digitalWrite(M2_IN1, HIGH);
-    digitalWrite(M2_IN2, LOW);
-  } else if (M2_Vel_output < 0) {
-    digitalWrite(M2_IN1, LOW);
-    digitalWrite(M2_IN2, HIGH);
+    //calculate pid output values
+    M1_Vel_input = M1_Vel;
+    M2_Vel_input = M2_Vel;
+    M1_Vel_PID.Compute();
+    M2_Vel_PID.Compute();
+
+    //logic for setting max increase in PWM values
+    //choosing between max acceleration and low acceleration
+    double local_Max_Acceleration = 0;
+    if((abs(M1_Current_PWM) < low_Speed_Cutoff_ForAcceleration_Top) && (abs(M1_Current_PWM) > low_Speed_Cutoff_ForAcceleration_Bottom)){
+      local_Max_Acceleration = low_Speed_Acceleration;
+    }else{
+      local_Max_Acceleration = max_Acceleration;
+    }
+
+    //M1
+    if(abs(M1_Vel_output - M1_Current_PWM) > local_Max_Acceleration){
+      if(M1_Vel_output > M1_Current_PWM){
+        M1_Current_PWM += local_Max_Acceleration;
+      }else{
+        M1_Current_PWM -= local_Max_Acceleration;
+      }
+    }else{
+      M1_Current_PWM = M1_Vel_output;
+    }
+
+    //M2
+    if(abs(M2_Vel_output - M2_Current_PWM) > local_Max_Acceleration){
+      if(M2_Vel_output > M2_Current_PWM){
+        M2_Current_PWM += local_Max_Acceleration;
+      }else{
+        M2_Current_PWM -= local_Max_Acceleration;
+      }
+    }else{
+      M2_Current_PWM = M2_Vel_output;
+    }
+
+    //M1 motor controll logic
+    if (M1_Current_PWM > 0) {
+      digitalWrite(M1_IN1, HIGH);
+      digitalWrite(M1_IN2, LOW);
+    } else if (M1_Current_PWM < 0) {
+      digitalWrite(M1_IN1, LOW);
+      digitalWrite(M1_IN2, HIGH);
+    }
+    // Set motor speed (output should be PWM signal to ENA)
+    analogWrite(M1_EN, int(abs(M1_Current_PWM)));
+      
+    //M2 motor control logic
+    if (M2_Current_PWM > 0) {
+      digitalWrite(M2_IN1, HIGH);
+      digitalWrite(M2_IN2, LOW);
+    } else if (M2_Current_PWM < 0) {
+      digitalWrite(M2_IN1, LOW);
+      digitalWrite(M2_IN2, HIGH);
+    }
+    // Set motor speed (output should be PWM signal to ENA)
+    analogWrite(M2_EN, int(abs(M2_Current_PWM)));
+
+    // Serial.print("M1 output");
+    // Serial.println(M1_Vel_output);
+
+    // delay(100);
+    Serial.print(">M1_Vel:");
+    Serial.print(M1_Vel_Save);
+    Serial.print(",Target:");
+    Serial.print(testTargetVelPID);
+    Serial.print(",Output:");
+    Serial.print(M1_Current_PWM);
+    Serial.print("\r\n");
+    // delay(5);
   }
-  // Set motor speed (output should be PWM signal to ENA)
-  analogWrite(M2_EN, int(abs(M2_Vel_output)));
-
-  // Serial.print("M1 output");
-  // Serial.println(M1_Vel_output);
-
-  // delay(100);
-  Serial.print(">M1_Vel:");
-  Serial.print(M1_Vel_Save);
-  Serial.print(",Target:");
-  Serial.print(testTargetVelPID);
-  Serial.print(",Output:");
-  Serial.print(M1_Vel_output);
-  Serial.print("\r\n");
-  delay(5);
 }
 
 void actionButtonWait(){
