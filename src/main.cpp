@@ -1,3 +1,23 @@
+//to-do
+/*
+1. Function to test min PWM values for moving from standstill - done needs testing
+  #set PWM output to 20 or so
+  #run for 1s,
+  #wait for button press, when it is pressed increase PWM by 1
+  #run and repeat
+2. Function to test velocity at pwm pwm values.
+  #set PWM value to takeoff PWM for 1s
+  #set PWM to test value - starting from 5 - inc by 5
+  #run for enough time to get steady state speed
+  
+3. Function to test max decelleration and acceleration without slipping
+
+3.Fix the Position targetting
+  option 1: use the 2 PID loops with a bump function where a minium PWM value is pulsed into the system to remove steady state error
+  option 2: use the 2 PID loops but with without libraries so that 
+
+*/
+
 #include <Wire.h>
 #include <Adafruit_LSM6DSOX.h>
 #include <PID_v1.h>
@@ -158,6 +178,52 @@ void IRAM_ATTR M2handleEncoderB() {
   }
 }
 
+void actuateDriveTrain(int M1PWM, int M2PWM, bool brake = false){ //negative PWM values are backwards
+  if(brake){ //braking
+    //M1
+    digitalWrite(M1_IN1, LOW);
+    digitalWrite(M1_IN2, LOW);
+    analogWrite(M1_EN, 0);
+
+    //M2
+    digitalWrite(M2_IN1, LOW);
+    digitalWrite(M2_IN2, LOW);
+    analogWrite(M2_EN, 0);
+  }else{ //driving
+    //normalise PWM if it comes in as invalid
+    if(M1PWM > 255){
+      M1PWM = 255;
+    }else if(M1PWM < -255){
+      M1PWM = -255;
+    }
+
+    if(M2PWM > 255){
+      M2PWM = 255;
+    }else if(M2PWM < -255){
+      M2PWM = -255;
+    }
+
+    //M1
+    if (M1PWM > 0) {
+      digitalWrite(M1_IN1, HIGH);
+      digitalWrite(M1_IN2, LOW);
+    } else if (M1PWM < 0) {
+      digitalWrite(M1_IN1, LOW);
+      digitalWrite(M1_IN2, HIGH);
+    }
+    analogWrite(M1_EN, int(abs(M1PWM)));
+
+    //M2
+    if (M2PWM > 0) {
+      digitalWrite(M2_IN1, HIGH);
+      digitalWrite(M2_IN2, LOW);
+    } else if (M2PWM < 0) {
+      digitalWrite(M2_IN1, LOW);
+      digitalWrite(M2_IN2, HIGH);
+    }
+    analogWrite(M2_EN, int(abs(M2PWM)));
+  }
+}
 
 void printPID(bool bypass = false){
     if(bypass){
@@ -181,63 +247,31 @@ void printPID(bool bypass = false){
       Serial.print(M2_encoderPos/10);
       Serial.print(",M1PWM:");
       Serial.print(M1_Vel_output);
-
-
-
-
-
       Serial.print("\r\n");
     }
 }
 
-void brakeMotors(){
-  // digitalWrite(M1_IN1, LOW);
-  // digitalWrite(M1_IN2, LOW);
-  // digitalWrite(M1_IN1, LOW);
-  // digitalWrite(M1_IN2, LOW);
-  analogWrite(M1_EN, 0);
-  analogWrite(M2_EN, 0);
-
-  delay(5000);
-}
-
 void DCMotorTest(){
-  analogWrite(M1_EN, 100);
-  analogWrite(M2_EN, 100);
-
-  int del = 10000;
+  int del = 5000;
   
   //M1
   Serial.println("M1 FORWARDS");
-  digitalWrite(M1_IN1, HIGH);
-  digitalWrite(M1_IN2, LOW);
+  actuateDriveTrain(255, 0);
   delay(del);
-  digitalWrite(M1_IN1, LOW);
-  digitalWrite(M1_IN2, LOW);
 
   Serial.println("M1 BACKWARDS");
-  digitalWrite(M1_IN1, LOW);
-  digitalWrite(M1_IN2, HIGH);
+  actuateDriveTrain(-255, 0);
   delay(del);
-  digitalWrite(M1_IN1, LOW);
-  digitalWrite(M1_IN2, LOW);
 
   //M2
   Serial.println("M2 FORWARDS");
-  digitalWrite(M2_IN1, HIGH);
-  digitalWrite(M2_IN2, LOW);
+  actuateDriveTrain(0, 255);
   delay(del);
-  digitalWrite(M2_IN1, LOW);
-  digitalWrite(M2_IN2, LOW);
 
   Serial.println("M1 BACKWARDS");
-  digitalWrite(M2_IN1, LOW);
-  digitalWrite(M2_IN2, HIGH);
+  actuateDriveTrain(0, -255);
   delay(del);
-  digitalWrite(M2_IN1, LOW);
-  digitalWrite(M2_IN2, LOW);
 }
-
 
 void PosPIDCalculation(bool bypass = false){
 
@@ -353,38 +387,13 @@ void VelPIDCalculation(){
     //   }
     // }
 
-    //M1 motor controll logic
-    if (M1_Vel_output > 0) {
-      digitalWrite(M1_IN1, HIGH);
-      digitalWrite(M1_IN2, LOW);
-    } else if (M1_Vel_output < 0) {
-      digitalWrite(M1_IN1, LOW);
-      digitalWrite(M1_IN2, HIGH);
-    }
-    // Set motor speed (output should be PWM signal to ENA)
-    analogWrite(M1_EN, int(abs(M1_Vel_output)));
-      
-    //M2 motor control logic
-    if (M2_Vel_output > 0) {
-      digitalWrite(M2_IN1, HIGH);
-      digitalWrite(M2_IN2, LOW);
-    } else if (M2_Vel_output < 0) {
-      digitalWrite(M2_IN1, LOW);
-      digitalWrite(M2_IN2, HIGH);
-    }
-    // Set motor speed (output should be PWM signal to ENA)
-    analogWrite(M2_EN, int(abs(M2_Vel_output)));
-
-    // Serial.print("M1 output");
-    // Serial.println(M1_Vel_output);
+    actuateDriveTrain(M1_Vel_output, M2_Vel_output);
 
     // delay(100);
     printPID(testingVelPID);
     // delay(5);
   }
 }
-
-
 
 void actionButtonWait(){
   //wait for the button to be pressed
@@ -438,6 +447,74 @@ void calcRollingAvg(){
   }
 }
 
+void takeOffTest(){
+  int PWMStartValue = 20;
+  int PWMinc = 1;
+  int millisTestTime = 1500;
+
+  while(true){ //turn off robot to end test
+    actuateDriveTrain(PWMStartValue,PWMStartValue);
+    Serial.print("testing takeoff PWM val: ");
+    Serial.println(PWMStartValue);
+    delay(millisTestTime);
+    actuateDriveTrain(0,0); //prevent too much strain
+    Serial.println("waiting for button press");
+    actionButtonWait();
+    PWMStartValue += PWMinc;
+  }
+}
+
+void velocityTest(){
+  int PWMTestVal = 5;
+  int PWMinc = 5;
+
+  int takeoffPWM = 35; //need to run takeoff test to validate this number
+  int takeOffMillis = 1000; //how long the robot is given to takeoff from standstill
+
+  int accelMillis = 1500; //how long the robot is given to speed up to vel
+  int velSampleMillis = 500; //sampling period once at speed
+
+  Serial.println("PWM value,velocityM1,velocityM2");
+
+  //main while loop for testing PWM values
+  while(true){ //turn off robot to stop test
+    //takeoff
+    if(abs(PWMTestVal) < takeoffPWM){
+      actuateDriveTrain(takeoffPWM, takeoffPWM);
+      delay(takeOffMillis);
+    }
+
+    //running velocity test
+    actuateDriveTrain(PWMTestVal, PWMTestVal);
+    delay(accelMillis);
+
+    //save encPos and time
+    long int saveTime = millis();
+    int M1_enc_save = M1_encoderPos;
+    int M2_enc_save = M2_encoderPos;
+    //sampling time
+    delay(velSampleMillis);
+
+    int deltaEncM1 = M1_encoderPos - M1_enc_save;
+    int deltaEncM2 = M2_encoderPos - M2_enc_save;
+
+    actuateDriveTrain(0, 0, true); //brake
+
+    double M1_Vel = ((double)deltaEncM1 / velSampleMillis) * 1000 * 60 / enc_Ticks_Per_Rot;
+    double M2_Vel = ((double)deltaEncM2 / velSampleMillis) * 1000 * 60 / enc_Ticks_Per_Rot;
+
+    //printing data for csv format
+    Serial.print(PWMTestVal);
+    Serial.print(",");
+    Serial.print(M1_Vel, 2);
+    Serial.print(",");
+    Serial.print(M2_Vel, 2);
+    PWMTestVal += PWMinc;
+
+    //wait for the button to be pressed
+    actionButtonWait();
+  }
+}
 
 void setup() {
   Serial.begin(115200);
@@ -507,17 +584,18 @@ void setup() {
 }
 
 void loop() {
-  calcRollingAvg();
+  // calcRollingAvg();
   if(loopNo==0){
     actionButtonWait();
 
-    //PID target for testing
-    M1_Pos_setpoint = testTargetPOSPID;
-    M2_Pos_setpoint = testTargetPOSPID;
+    // //PID target for testing
+    // M1_Pos_setpoint = testTargetPOSPID;
+    // M2_Pos_setpoint = testTargetPOSPID;
   }
 
-  VelPIDCalculation();
+  takeOffTest();
 
-  // delay(100);
+  // VelPIDCalculation();
+
   loopNo++;  
 }
