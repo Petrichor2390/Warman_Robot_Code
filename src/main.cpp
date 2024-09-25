@@ -64,7 +64,9 @@ unsigned long action_DebounceDelay = 50;
 
 //characteristic motor variables
 int enc_Ticks_Per_Rot = 961;
-const int TRANSLATE_MAX_SPEED = 300; //RPM for moving motors
+const int TRANSLATE_MAX_SPEED = 450; //RPM for moving motors
+const int TRANSLATE_MIN_SPEED = 100; //otherwise velocity PID fucks up becuase of deadzone
+int min_Takeoff_PWM = 63;
 //max acceleration for motors - post PID
 double max_Acceleration = 100; //max change in PWM value output to the motors
 double low_Speed_Acceleration = 100;
@@ -78,7 +80,7 @@ int prev_M2_enc_Pos = 0;
 
 double M1_Vel_input, M1_Vel_output, M1_Vel_setpoint;
 double M2_Vel_input, M2_Vel_output, M2_Vel_setpoint;
-double Vel_Kp = 0.3, Vel_Ki = 0, Vel_Kd = 0.0; //0.15 //i0.8 //p 1.5 //d 0.05
+double Vel_Kp = 1, Vel_Ki = 3, Vel_Kd = 0.000001; //i think that velocity pid p value should always be 1
 
 PID M1_Vel_PID(&M1_Vel_input, &M1_Vel_output, &M1_Vel_setpoint, Vel_Kp, Vel_Ki, Vel_Kd, DIRECT);
 PID M2_Vel_PID(&M2_Vel_input, &M2_Vel_output, &M2_Vel_setpoint, Vel_Kp, Vel_Ki, Vel_Kd, DIRECT);
@@ -115,10 +117,10 @@ PID M2_Pos_PID(&M2_Pos_input, &M2_Pos_output, &M2_Pos_setpoint, Pos_Kp, Pos_Ki, 
 
 //temporary variables used for testing purposes
 int loopNo = 0;
-double testTargetVelPID = 150;
+double testTargetVelPID = 100;
 double testTargetPOSPID = 961*5;
 bool testingVelPID = true; //true if testing vel pid false if running position PIDs
-bool printPIDtesting = false; //true if you want PID to print, false if you want no pid to print
+bool printPIDtesting = true; //true if you want PID to print, false if you want no pid to print
 long int brakeTime = 3500; //2 seconds after the button is pressed brake
 long int buttonPressTime = 0;
 
@@ -239,7 +241,7 @@ int velocityToPWM(double velocity){
   }
   
   double PWMReturn;
-  double relationCutoff = 32; //the point at which the PWM relationship doesn't hold
+  double relationCutoff = 34; //the point at which the PWM relationship doesn't hold //was 32 but the robot would sometimes stop at this PWM
 
   //quadratic formula co-efficients
   float a = -0.0108;
@@ -270,7 +272,7 @@ int velocityToPWM(double velocity){
   }
 
   //if the velocity request was negative we need to flip the calculation back to negative PWM
-  if(posVelocityRequest){
+  if(!posVelocityRequest){
     PWMReturn = -PWMReturn;
   }
 
@@ -282,12 +284,20 @@ void printPID(bool bypass = false){
     if(bypass){
       Serial.print(">M1_Vel:");
       Serial.print(M1_Vel_Save);
+      Serial.print(",M2_Vel:");
+      Serial.print(M2_Vel_Save);
       Serial.print(",Target:");
       Serial.print(testTargetVelPID);
       Serial.print(",PWMM1:");
       Serial.print(M1_Current_PWM);
+      Serial.print(",PWMM2:");
+      Serial.print(M2_Current_PWM);
       Serial.print(",M1VelPIDOut:");
       Serial.print(M1_Vel_output);
+      Serial.print(",M2VelPIDOut:");
+      Serial.print(M2_Vel_output);
+      Serial.print(",M1_Rolling_Avg_Vel:");
+      Serial.print(M1_Rolling_Avg_Vel);
       Serial.print("\r\n");
     }else{
       Serial.print(">M1_Vel:");
@@ -366,8 +376,8 @@ void VelPIDCalculation(){
     prev_Vel_PID_Time = current_Time;
     
     //input velocity from secondary core calculations
-    M1_Vel_input = M1_Vel_Save;
-    M2_Vel_input = M2_Vel_Save;
+    M1_Vel_input = double(M1_Vel_Save);
+    M2_Vel_input = double(M2_Vel_Save);
 
     //calculate pid output values
     M1_Vel_PID.Compute();
@@ -376,6 +386,18 @@ void VelPIDCalculation(){
     //convert velocity request to corresponding PWM reponse
     int M1_PWM_Out = velocityToPWM(M1_Vel_output);
     int M2_PWM_Out = velocityToPWM(M2_Vel_output);
+
+    //check for takeoff condition
+    double avgPWM =  (M1_PWM_Out+M2_PWM_Out)/2;
+    if(abs(M1_Rolling_Avg_Vel) < 1 && abs(M2_Rolling_Avg_Vel) < 1 && abs(avgPWM) < min_Takeoff_PWM){ //not moving and too low PWM to start
+      if(avgPWM > 0){
+        M1_PWM_Out = min_Takeoff_PWM;
+        M2_PWM_Out = min_Takeoff_PWM;
+      }else{
+        M1_PWM_Out = -min_Takeoff_PWM;
+        M2_PWM_Out = -min_Takeoff_PWM;
+      }
+    }
 
     //send PWM to drivetrain
     actuateDriveTrain(M1_PWM_Out, M2_PWM_Out);
@@ -388,7 +410,7 @@ void VelPIDCalculation(){
   }
 }
 
-void actionButtonWait(bool print = false){
+void actionButtonWait(bool print = true){
   //wait for the button to be pressed
   bool pressed = false;
   while(!pressed){
@@ -526,7 +548,7 @@ void core0Loop(void * pvParameters) {
         //velocity calculation
         long int current_Time = micros();
         double time_Passed = (current_Time - prev_Time)/1000; //convert from micros to millis
-        if (time_Passed > 5){ //enough time has passed to get a decent sample of velocity
+        if (time_Passed > 15){ //enough time has passed to get a decent sample of velocity
           //setting prev_time to time now as calculating is occcuring now
           prev_Time = micros();
 
@@ -538,18 +560,21 @@ void core0Loop(void * pvParameters) {
           prev_M1_enc_Pos = M1_encoderPos;
           prev_M2_enc_Pos = M2_encoderPos;
 
-          Serial.print("time_Passed: ");
-          Serial.println(time_Passed);
+          // Serial.print("time_Passed: ");
+          // Serial.println(time_Passed);
 
-          Serial.print("M1_deltaEncPos: ");
-          Serial.println(M1_deltaEncPos);
+          // Serial.print("M1_deltaEncPos: ");
+          // Serial.println(M1_deltaEncPos);
 
           //calculate velocity and save to global variable
-          double M1_Vel_Save = ((double)M1_deltaEncPos / time_Passed) * 1000 * 60 / enc_Ticks_Per_Rot;
-          double M2_Vel_Save = ((double)M2_deltaEncPos / time_Passed) * 1000 * 60 / enc_Ticks_Per_Rot;
+          M1_Vel_Save = ((double)M1_deltaEncPos / time_Passed) * 1000 * 60 / enc_Ticks_Per_Rot;
+          M2_Vel_Save = ((double)M2_deltaEncPos / time_Passed) * 1000 * 60 / enc_Ticks_Per_Rot;
 
-          Serial.print("M1_Vel: ");
-          Serial.println(M1_Vel_Save);
+          //vel save has changed now calculate the rolling average again with the change
+          calcRollingAvg();
+
+          // Serial.print("M1_Vel: ");
+          // Serial.println(M1_Vel_Save);
         }
 
         //stability/not really sure if this is needed
@@ -597,19 +622,23 @@ void setup() {
   //PID SETUP
   M1_Vel_PID.SetMode(AUTOMATIC);
   M2_Vel_PID.SetMode(AUTOMATIC);
-  M1_Vel_PID.SetOutputLimits(-230, 230);
-  M2_Vel_PID.SetOutputLimits(-230, 230);
+  M1_Vel_PID.SetOutputLimits(-TRANSLATE_MAX_SPEED, TRANSLATE_MAX_SPEED);
+  M2_Vel_PID.SetOutputLimits(-TRANSLATE_MAX_SPEED, TRANSLATE_MAX_SPEED);
+  // M1_Vel_PID.SetSampleTime(7);
+  // M2_Vel_PID.SetSampleTime(7);
 
   M1_Pos_PID.SetMode(AUTOMATIC);
   M2_Pos_PID.SetMode(AUTOMATIC);
   M1_Pos_PID.SetOutputLimits(-TRANSLATE_MAX_SPEED, TRANSLATE_MAX_SPEED);
   M2_Pos_PID.SetOutputLimits(-TRANSLATE_MAX_SPEED, TRANSLATE_MAX_SPEED);
+  M1_Pos_PID.SetSampleTime(50);
+  M2_Pos_PID.SetSampleTime(50);
 
   //Action button setup
   pinMode(ACTION_BUTTON_PIN, INPUT);
 
   M1_Vel_setpoint = 0;
-  M1_Vel_setpoint = 0;
+  M2_Vel_setpoint = 0;
 
   M1_Pos_setpoint = 0;
   M2_Pos_setpoint = 0;
@@ -636,19 +665,12 @@ void setup() {
 void loop() {
   // calcRollingAvg();
   if(loopNo==0){
-    // actionButtonWait();
+    actionButtonWait();
 
     // //PID target for testing
     // M1_Pos_setpoint = testTargetPOSPID;
     // M2_Pos_setpoint = testTargetPOSPID;
   }
-  // velocityTest();
-  // DCMotorTest();
-
-  // takeOffTest();
-
-
-
   
 
   VelPIDCalculation();
