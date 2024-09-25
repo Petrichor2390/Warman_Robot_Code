@@ -63,10 +63,13 @@ unsigned long action_LastDebounceTime = 0;
 unsigned long action_DebounceDelay = 50;
 
 //characteristic motor variables
-int enc_Ticks_Per_Rot = 961;
+const double GEAR_RATIO = 20.4086;
+const int TICKS_PER_MOTOR_TURN = 48;
+double enc_Ticks_Per_Rot = GEAR_RATIO*TICKS_PER_MOTOR_TURN;
 const int TRANSLATE_MAX_SPEED = 450; //RPM for moving motors
 const int TRANSLATE_MIN_SPEED = 100; //otherwise velocity PID fucks up becuase of deadzone
-int min_Takeoff_PWM = 63;
+int min_Takeoff_PWM = 63; //was 63
+const double WHEEL_CIRCUMFERANCE = 0.1288053; //in meters
 //max acceleration for motors - post PID
 double max_Acceleration = 100; //max change in PWM value output to the motors
 double low_Speed_Acceleration = 100;
@@ -80,7 +83,7 @@ int prev_M2_enc_Pos = 0;
 
 double M1_Vel_input, M1_Vel_output, M1_Vel_setpoint;
 double M2_Vel_input, M2_Vel_output, M2_Vel_setpoint;
-double Vel_Kp = 1, Vel_Ki = 3, Vel_Kd = 0.000001; //i think that velocity pid p value should always be 1
+double Vel_Kp = 0.5, Vel_Ki = 0, Vel_Kd = 0.001; //Vel_Kp = 1, Vel_Ki = 3, Vel_Kd = 0.000001;
 
 PID M1_Vel_PID(&M1_Vel_input, &M1_Vel_output, &M1_Vel_setpoint, Vel_Kp, Vel_Ki, Vel_Kd, DIRECT);
 PID M2_Vel_PID(&M2_Vel_input, &M2_Vel_output, &M2_Vel_setpoint, Vel_Kp, Vel_Ki, Vel_Kd, DIRECT);
@@ -95,7 +98,7 @@ double M1_Current_PWM = 0;
 double M2_Current_PWM = 0;
 
 //rolling average velocity
-const int roll_N = 10;
+const int roll_N = 3;
 double M1_Rolling_Avg_Vel_Sum = 0;
 double M2_Rolling_Avg_Vel_Sum = 0;
 double M1_Rolling_Avg_Vel_Values[roll_N];
@@ -109,20 +112,29 @@ bool roll_Avg_Filled = false;
 //input = position from encoders, output = setpoint for Velocity PID (range from -300 to 300), setpoint = targets on the track
 double M1_Pos_input, M1_Pos_output, M1_Pos_setpoint;
 double M2_Pos_input, M2_Pos_output, M2_Pos_setpoint;
-double Pos_Kp = 0.35, Pos_Ki = 0, Pos_Kd = 0.0; //p0.15
+double Pos_Kp = 0.09, Pos_Ki = 0, Pos_Kd = 0.0; //p = 0.08
 
 PID M1_Pos_PID(&M1_Pos_input, &M1_Pos_output, &M1_Pos_setpoint, Pos_Kp, Pos_Ki, Pos_Kd, DIRECT);
 PID M2_Pos_PID(&M2_Pos_input, &M2_Pos_output, &M2_Pos_setpoint, Pos_Kp, Pos_Ki, Pos_Kd, DIRECT);
 
+double prev_M1_Pos_output = 0;
+double prev_M2_Pos_output = 0;
+double max_Pos_Output_change = 20;
 
 //temporary variables used for testing purposes
 int loopNo = 0;
-double testTargetVelPID = 100;
-double testTargetPOSPID = 961*5;
-bool testingVelPID = true; //true if testing vel pid false if running position PIDs
+double testTargetVelPID = 200; //in rpm
+double testTargetPOSPID = 1.2; //in meters
+bool testingVelPID = false; //true if testing vel pid false if running position PIDs
 bool printPIDtesting = true; //true if you want PID to print, false if you want no pid to print
 long int brakeTime = 3500; //2 seconds after the button is pressed brake
 long int buttonPressTime = 0;
+bool printMotorVelError = false;
+double velError = 0;
+
+//temporary reach goal varaibles
+bool M1_reached = false;
+bool M2_reached = false;
 
 //M1 interupts
 void IRAM_ATTR M1handleEncoderA() {
@@ -208,25 +220,35 @@ void actuateDriveTrain(int M1PWM, int M2PWM, bool brake = false){ //negative PWM
     }
 
     //M1
-    if (M1PWM > 0) {
-      digitalWrite(M1_IN1, HIGH);
-      digitalWrite(M1_IN2, LOW);
-    } else if (M1PWM < 0) {
-      digitalWrite(M1_IN1, LOW);
-      digitalWrite(M1_IN2, HIGH);
+    if(!M1_reached){
+      if (M1PWM > 0) {
+        digitalWrite(M1_IN1, HIGH);
+        digitalWrite(M1_IN2, LOW);
+      } else if (M1PWM < 0) {
+        digitalWrite(M1_IN1, LOW);
+        digitalWrite(M1_IN2, HIGH);
+      }
+      analogWrite(M1_EN, int(abs(M1PWM)));
     }
-    analogWrite(M1_EN, int(abs(M1PWM)));
 
     //M2
-    if (M2PWM > 0) {
-      digitalWrite(M2_IN1, HIGH);
-      digitalWrite(M2_IN2, LOW);
-    } else if (M2PWM < 0) {
-      digitalWrite(M2_IN1, LOW);
-      digitalWrite(M2_IN2, HIGH);
+    if(!M2_reached){
+      if (M2PWM > 0) {
+        digitalWrite(M2_IN1, HIGH);
+        digitalWrite(M2_IN2, LOW);
+      } else if (M2PWM < 0) {
+        digitalWrite(M2_IN1, LOW);
+        digitalWrite(M2_IN2, HIGH);
+      }
+      analogWrite(M2_EN, int(abs(M2PWM)));
     }
-    analogWrite(M2_EN, int(abs(M2PWM)));
   }
+}
+
+double metersToEncTicks(double m){
+  double rotations = m/WHEEL_CIRCUMFERANCE;
+  double ticks = rotations*enc_Ticks_Per_Rot;
+  return ticks;
 }
 
 int velocityToPWM(double velocity){
@@ -280,42 +302,49 @@ int velocityToPWM(double velocity){
 }
 
 void printPID(bool bypass = false){
-  if(printPIDtesting){
-    if(bypass){
-      Serial.print(">M1_Vel:");
-      Serial.print(M1_Vel_Save);
-      Serial.print(",M2_Vel:");
-      Serial.print(M2_Vel_Save);
-      Serial.print(",Target:");
-      Serial.print(testTargetVelPID);
-      Serial.print(",PWMM1:");
-      Serial.print(M1_Current_PWM);
-      Serial.print(",PWMM2:");
-      Serial.print(M2_Current_PWM);
-      Serial.print(",M1VelPIDOut:");
-      Serial.print(M1_Vel_output);
-      Serial.print(",M2VelPIDOut:");
-      Serial.print(M2_Vel_output);
-      Serial.print(",M1_Rolling_Avg_Vel:");
-      Serial.print(M1_Rolling_Avg_Vel);
-      Serial.print("\r\n");
-    }else{
-      Serial.print(">M1_Vel:");
-      Serial.print(M1_Vel_Save);
-      Serial.print(",POSPID Target:");
-      Serial.print(testTargetPOSPID/10);
-      Serial.print(",POSPID_Out:");
-      Serial.print(M1_Pos_output);
-      Serial.print(",M1encPos:");
-      Serial.print(M1_encoderPos/10);
-      Serial.print(",M2encPos:");
-      Serial.print(M2_encoderPos/10);
-      Serial.print(",M1PWM:");
-      Serial.print(M1_Current_PWM);
-      Serial.print(",VelPIDOut:");
-      Serial.print(M1_Vel_output);
-      Serial.print("\r\n");
+  if(!printMotorVelError){
+    if(printPIDtesting){
+      if(bypass){
+        Serial.print(">M1_Vel:");
+        Serial.print(M1_Vel_Save);
+        Serial.print(",M2_Vel:");
+        Serial.print(M2_Vel_Save);
+        Serial.print(",Target:");
+        Serial.print(testTargetVelPID);
+        Serial.print(",PWMM1:");
+        Serial.print(M1_Current_PWM);
+        Serial.print(",PWMM2:");
+        Serial.print(M2_Current_PWM);
+        Serial.print(",M1VelPIDOut:");
+        Serial.print(M1_Vel_output);
+        Serial.print(",M2VelPIDOut:");
+        Serial.print(M2_Vel_output);
+        Serial.print(",M1_Rolling_Avg_Vel:");
+        Serial.print(M1_Rolling_Avg_Vel);
+        Serial.print("\r\n");
+      }else{
+        Serial.print(">M1_Vel:");
+        Serial.print(M1_Vel_Save);
+        Serial.print(",POSPID Target:");
+        Serial.print(testTargetPOSPID/10);
+        Serial.print(",POSPID_Out:");
+        Serial.print(M1_Pos_output);
+        Serial.print(",M1encPos:");
+        Serial.print(M1_encoderPos/10);
+        Serial.print(",M2encPos:");
+        Serial.print(M2_encoderPos/10);
+        Serial.print(",M1PWM:");
+        Serial.print(M1_Current_PWM);
+        Serial.print(",VelPIDOut:");
+        Serial.print(M1_Vel_output);
+        Serial.print("\r\n");
+      }
     }
+  }else{
+    velError = M1_Vel_Save - M2_Vel_Save;
+    Serial.print(">VelError:");
+    Serial.print(velError);
+    Serial.print("\r\n");
   }
 }
 
@@ -352,9 +381,25 @@ void PosPIDCalculation(bool bypass = false){
     M1_Pos_PID.Compute();
     M2_Pos_PID.Compute();
 
+    //logic for modifing position increases to limit acceleration
+    if(abs(M1_Pos_output-prev_M1_Pos_output) > max_Pos_Output_change){
+      if(M1_Pos_output > prev_M1_Pos_output){
+        M1_Pos_output = prev_M1_Pos_output + max_Pos_Output_change;
+      }
+    }
+
+    if(abs(M2_Pos_output-prev_M2_Pos_output) > max_Pos_Output_change){
+      if(M2_Pos_output > prev_M2_Pos_output){
+        M2_Pos_output = prev_M2_Pos_output + max_Pos_Output_change;
+      }
+    }
+
     //set Vel PID setpoint to Pos PID output
     M1_Vel_setpoint = M1_Pos_output;
     M2_Vel_setpoint = M2_Pos_output;
+
+    prev_M1_Pos_output = M1_Pos_output;
+    prev_M2_Pos_output = M2_Pos_output;
   }else{
     //used for testing velocity PID
     M1_Vel_setpoint = testTargetVelPID;
@@ -369,7 +414,7 @@ void VelPIDCalculation(){
   double time_Passed = (current_Time - prev_Vel_PID_Time)/1000; //convert from micros to millis
 
   //avoid to small increments and increase repeatability
-  if (time_Passed < 5) {
+  if (time_Passed < 10) {
     return; 
   }else{
     PosPIDCalculation(testingVelPID); //bypass = true - skipping for vel pid calc
@@ -384,12 +429,16 @@ void VelPIDCalculation(){
     M2_Vel_PID.Compute();
 
     //convert velocity request to corresponding PWM reponse
-    int M1_PWM_Out = velocityToPWM(M1_Vel_output);
-    int M2_PWM_Out = velocityToPWM(M2_Vel_output);
+    int M1_PWM_Out = M1_Vel_output + velocityToPWM(M1_Vel_setpoint);
+    int M2_PWM_Out = M2_Vel_output + velocityToPWM(M2_Vel_setpoint);
+
+    // Serial.println(M1_PWM_Out);
+    // Serial.println(M2_PWM_Out);
+
 
     //check for takeoff condition
-    double avgPWM =  (M1_PWM_Out+M2_PWM_Out)/2;
-    if(abs(M1_Rolling_Avg_Vel) < 1 && abs(M2_Rolling_Avg_Vel) < 1 && abs(avgPWM) < min_Takeoff_PWM){ //not moving and too low PWM to start
+    double avgPWM = (M1_PWM_Out+M2_PWM_Out)/2;
+    if(abs(M1_Rolling_Avg_Vel) < 10 && abs(M2_Rolling_Avg_Vel) < 10 && abs(avgPWM) < min_Takeoff_PWM){ //not moving and too low PWM to start
       if(avgPWM > 0){
         M1_PWM_Out = min_Takeoff_PWM;
         M2_PWM_Out = min_Takeoff_PWM;
@@ -407,6 +456,32 @@ void VelPIDCalculation(){
     M2_Current_PWM = M2_PWM_Out;
     
     printPID(testingVelPID);
+  }
+}
+
+void goalManager(){
+  //temporary logic for testing a single goal for now
+  double pos_Tolerance = metersToEncTicks(0.005); 
+  double vel_Tolerance = 30;
+
+  //if M1 is within range brake
+  if(abs(testTargetPOSPID - M1_encoderPos) < pos_Tolerance && M1_Vel_Save < vel_Tolerance){
+    M1_reached = true;
+    // digitalWrite(M1_IN1, LOW);
+    // digitalWrite(M1_IN2, LOW);
+    Serial.print("motor 1 velocity at stop command: ");
+    Serial.println(M1_Rolling_Avg_Vel);
+    analogWrite(M1_EN, 0);
+  }
+
+  //if M2 is within range brake
+  if(abs(testTargetPOSPID - M2_encoderPos) < pos_Tolerance && M2_Vel_Save < vel_Tolerance){
+    M2_reached = true;
+    // digitalWrite(M2_IN1, LOW);
+    // digitalWrite(M2_IN2, LOW);
+    Serial.print("motor 2 velocity at stop command: ");
+    Serial.println(M2_Rolling_Avg_Vel);
+    analogWrite(M2_EN, 0);
   }
 }
 
@@ -624,8 +699,8 @@ void setup() {
   M2_Vel_PID.SetMode(AUTOMATIC);
   M1_Vel_PID.SetOutputLimits(-TRANSLATE_MAX_SPEED, TRANSLATE_MAX_SPEED);
   M2_Vel_PID.SetOutputLimits(-TRANSLATE_MAX_SPEED, TRANSLATE_MAX_SPEED);
-  // M1_Vel_PID.SetSampleTime(7);
-  // M2_Vel_PID.SetSampleTime(7);
+  M1_Vel_PID.SetSampleTime(10);
+  M2_Vel_PID.SetSampleTime(10);
 
   M1_Pos_PID.SetMode(AUTOMATIC);
   M2_Pos_PID.SetMode(AUTOMATIC);
@@ -668,12 +743,17 @@ void loop() {
     actionButtonWait();
 
     // //PID target for testing
-    // M1_Pos_setpoint = testTargetPOSPID;
-    // M2_Pos_setpoint = testTargetPOSPID;
+    testTargetPOSPID = metersToEncTicks(testTargetPOSPID);
+
+    if(!testingVelPID){
+      M1_Pos_setpoint = testTargetPOSPID;
+      M2_Pos_setpoint = testTargetPOSPID;
+    }
   }
   
 
   VelPIDCalculation();
+  goalManager();
 
 
   delay(1);

@@ -70,3 +70,32 @@
     // //saving vel for print and data logging
     // M1_Vel_Save = M1_Vel;
     // M2_Vel_Save = M2_Vel;
+
+
+    //saving code for limiting PWM increases
+        //if the robot is moving but is below 100 RPM limit pwm increases
+    // double allowed_PWM_Change = 1;
+    // int accelCuttoff = 100;
+    // if(abs(M1_Rolling_Avg_Vel) < accelCuttoff && abs(M2_Rolling_Avg_Vel) < accelCuttoff){
+    //   // Serial.println("triggered limiting PWM");
+    //   double M1_PWM_Change = M1_PWM_Out - M1_Current_PWM;
+    //   double M2_PWM_Change = M2_PWM_Out - M2_Current_PWM;
+      
+    //   if(abs(M1_PWM_Change) > allowed_PWM_Change){ //if PWM changes too much on M1
+    //     if(M1_PWM_Out > 0 && M1_PWM_Change > 0){
+    //       M1_PWM_Out = M1_Current_PWM + allowed_PWM_Change;
+    //     }
+    //     if(M1_PWM_Out < 0 && M1_PWM_Change < 0){
+    //       M1_PWM_Out = M1_Current_PWM - allowed_PWM_Change;
+    //     }
+    //   }
+
+    //   if(abs(M2_PWM_Change) > allowed_PWM_Change){ //if PWM changes too much on M1
+    //     if(M2_PWM_Out > 0 && M2_PWM_Change > 0){
+    //       M2_PWM_Out = M2_Current_PWM + allowed_PWM_Change;
+    //     }
+    //     if(M2_PWM_Out < 0 && M2_PWM_Change < 0){
+    //       M2_PWM_Out = M2_Current_PWM - allowed_PWM_Change;
+    //     }
+    //   }
+    // }
