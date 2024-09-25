@@ -78,7 +78,7 @@ int prev_M2_enc_Pos = 0;
 
 double M1_Vel_input, M1_Vel_output, M1_Vel_setpoint;
 double M2_Vel_input, M2_Vel_output, M2_Vel_setpoint;
-double Vel_Kp = 0.3, Vel_Ki = 0.8, Vel_Kd = 0.0; //0.15 //i0.8 //p 1.5 //d 0.05
+double Vel_Kp = 0.3, Vel_Ki = 0, Vel_Kd = 0.0; //0.15 //i0.8 //p 1.5 //d 0.05
 
 PID M1_Vel_PID(&M1_Vel_input, &M1_Vel_output, &M1_Vel_setpoint, Vel_Kp, Vel_Ki, Vel_Kd, DIRECT);
 PID M2_Vel_PID(&M2_Vel_input, &M2_Vel_output, &M2_Vel_setpoint, Vel_Kp, Vel_Ki, Vel_Kd, DIRECT);
@@ -92,7 +92,6 @@ double M2_Prev_PWM_Output = 0;
 double M1_Current_PWM = 0;
 double M2_Current_PWM = 0;
 
-
 //rolling average velocity
 const int roll_N = 10;
 double M1_Rolling_Avg_Vel_Sum = 0;
@@ -103,7 +102,6 @@ double M1_Rolling_Avg_Vel = 0;
 double M2_Rolling_Avg_Vel = 0;
 int roll_Index = 0;
 bool roll_Avg_Filled = false;
-
 
 //Position PID################################################################# 
 //input = position from encoders, output = setpoint for Velocity PID (range from -300 to 300), setpoint = targets on the track
@@ -119,7 +117,8 @@ PID M2_Pos_PID(&M2_Pos_input, &M2_Pos_output, &M2_Pos_setpoint, Pos_Kp, Pos_Ki, 
 int loopNo = 0;
 double testTargetVelPID = 150;
 double testTargetPOSPID = 961*5;
-bool testingVelPID = false; //true if testing vel pid false if running position PIDs
+bool testingVelPID = true; //true if testing vel pid false if running position PIDs
+bool printPIDtesting = false; //true if you want PID to print, false if you want no pid to print
 long int brakeTime = 3500; //2 seconds after the button is pressed brake
 long int buttonPressTime = 0;
 
@@ -228,7 +227,58 @@ void actuateDriveTrain(int M1PWM, int M2PWM, bool brake = false){ //negative PWM
   }
 }
 
+int velocityToPWM(double velocity){
+  //input velocity in rpm
+
+  bool posVelocityRequest;
+  if(velocity > 0){
+    posVelocityRequest = true;
+  }else{
+    posVelocityRequest = false;
+    velocity = abs(velocity);
+  }
+  
+  double PWMReturn;
+  double relationCutoff = 32; //the point at which the PWM relationship doesn't hold
+
+  //quadratic formula co-efficients
+  float a = -0.0108;
+  float b = 4.9083;
+  float c = -74.459 - velocity;
+
+  // Calculate discriminant
+  float discriminant = b * b - 4 * a * c;
+
+  if (discriminant < 0) {
+    Serial.println("No real solutions to PWM conversion returning 0 PWM");
+    return 0;
+  } else {
+    // Two possible solutions for x
+    float x1 = (-b + sqrt(discriminant)) / (2 * a);
+    float x2 = (-b - sqrt(discriminant)) / (2 * a);
+
+    if(x1 < x2){
+      PWMReturn = x1;
+    }else{
+      PWMReturn = x2;
+    }
+  }
+
+  //if the PWM value is less than the cutoff point set it to the cutoff point
+  if(PWMReturn < relationCutoff){
+    PWMReturn = relationCutoff;
+  }
+
+  //if the velocity request was negative we need to flip the calculation back to negative PWM
+  if(posVelocityRequest){
+    PWMReturn = -PWMReturn;
+  }
+
+  return int(PWMReturn);
+}
+
 void printPID(bool bypass = false){
+  if(printPIDtesting){
     if(bypass){
       Serial.print(">M1_Vel:");
       Serial.print(M1_Vel_Save);
@@ -256,6 +306,7 @@ void printPID(bool bypass = false){
       Serial.print(M1_Vel_output);
       Serial.print("\r\n");
     }
+  }
 }
 
 void DCMotorTest(){
@@ -465,56 +516,6 @@ void velocityTest(){
   }
 }
 
-int velocityToPWM(double velocity){
-  //input velocity in rpm
-
-  bool posVelocityRequest;
-  if(velocity > 0){
-    posVelocityRequest = true;
-  }else{
-    posVelocityRequest = false;
-    velocity = abs(velocity);
-  }
-  
-  double PWMReturn;
-  double relationCutoff = 32; //the point at which the PWM relationship doesn't hold
-
-  //quadratic formula co-efficients
-  float a = -0.0108;
-  float b = 4.9083;
-  float c = -74.459 - velocity;
-
-  // Calculate discriminant
-  float discriminant = b * b - 4 * a * c;
-
-  if (discriminant < 0) {
-    Serial.println("No real solutions to PWM conversion returning 0 PWM");
-    return 0;
-  } else {
-    // Two possible solutions for x
-    float x1 = (-b + sqrt(discriminant)) / (2 * a);
-    float x2 = (-b - sqrt(discriminant)) / (2 * a);
-
-    if(x1 < x2){
-      PWMReturn = x1;
-    }else{
-      PWMReturn = x2;
-    }
-  }
-
-  //if the PWM value is less than the cutoff point set it to the cutoff point
-  if(PWMReturn < relationCutoff){
-    PWMReturn = relationCutoff;
-  }
-
-  //if the velocity request was negative we need to flip the calculation back to negative PWM
-  if(posVelocityRequest){
-    PWMReturn = -PWMReturn;
-  }
-
-  return int(PWMReturn);
-}
-
 void core0Loop(void * pvParameters) {
     long int current_Time = micros();
     long int prev_Time = micros();
@@ -537,15 +538,18 @@ void core0Loop(void * pvParameters) {
           prev_M1_enc_Pos = M1_encoderPos;
           prev_M2_enc_Pos = M2_encoderPos;
 
-          // Serial.print("time_Passed: ");
-          // Serial.println(time_Passed);
+          Serial.print("time_Passed: ");
+          Serial.println(time_Passed);
 
-          // Serial.print("M1_deltaEncPos: ");
-          // Serial.println(M1_deltaEncPos);
+          Serial.print("M1_deltaEncPos: ");
+          Serial.println(M1_deltaEncPos);
 
           //calculate velocity and save to global variable
           double M1_Vel_Save = ((double)M1_deltaEncPos / time_Passed) * 1000 * 60 / enc_Ticks_Per_Rot;
           double M2_Vel_Save = ((double)M2_deltaEncPos / time_Passed) * 1000 * 60 / enc_Ticks_Per_Rot;
+
+          Serial.print("M1_Vel: ");
+          Serial.println(M1_Vel_Save);
         }
 
         //stability/not really sure if this is needed
@@ -647,10 +651,9 @@ void loop() {
 
   
 
-  // VelPIDCalculation();
+  VelPIDCalculation();
 
-  Serial.println("core 1 printing");
 
-  delay(100);
+  delay(1);
   loopNo++;  
 }
