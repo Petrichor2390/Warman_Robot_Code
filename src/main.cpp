@@ -5,7 +5,7 @@
   #run for 1s,
   #wait for button press, when it is pressed increase PWM by 1
   #run and repeat
-2. Function to test velocity at pwm pwm values.
+2. Function to test velocity at pwm pwm values. - done needs testing
   #set PWM value to takeoff PWM for 1s
   #set PWM to test value - starting from 5 - inc by 5
   #run for enough time to get steady state speed
@@ -398,13 +398,15 @@ void VelPIDCalculation(){
   }
 }
 
-void actionButtonWait(){
+void actionButtonWait(bool print = false){
   //wait for the button to be pressed
   bool pressed = false;
   while(!pressed){
 
     int reading = digitalRead(ACTION_BUTTON_PIN);
-    printPID(testingVelPID);
+    if(print){
+      printPID(testingVelPID);
+    }
 
     if (reading != action_ButtonState) {
       action_LastDebounceTime = millis();
@@ -470,9 +472,10 @@ void takeOffTest(){
 void velocityTest(){
   int PWMTestVal = 5;
   int PWMinc = 5;
+  int PWMminInc = 1;
 
-  int takeoffPWM = 35; //need to run takeoff test to validate this number
-  int takeOffMillis = 1000; //how long the robot is given to takeoff from standstill
+  int takeoffPWM = 60; //need to run takeoff test to validate this number
+  int takeOffMillis = 250; //how long the robot is given to takeoff from standstill
 
   int accelMillis = 1500; //how long the robot is given to speed up to vel
   int velSampleMillis = 500; //sampling period once at speed
@@ -511,19 +514,66 @@ void velocityTest(){
     Serial.print(",");
     Serial.print(M1_Vel, 2);
     Serial.print(",");
-    Serial.print(M2_Vel, 2);
-    PWMTestVal += PWMinc;
+    Serial.println(M2_Vel, 2);
 
+    if(abs(PWMTestVal) < takeoffPWM){
+      PWMTestVal += PWMminInc;
+    }else{
+      PWMTestVal += PWMinc;
+    }
     //wait for the button to be pressed
     actionButtonWait();
   }
 }
 
-void core2Loop(void * parameter){
-  while(true){
-    delay(100);
-    Serial.println("running on core 0");
+double velocityToPWM(double velocity){
+  //input velocity in rpm
+
+  bool posVelocityRequest;
+  if(velocity > 0){
+    posVelocityRequest = true;
+  }else{
+    posVelocityRequest = false;
+    velocity = abs(velocity);
   }
+  
+  double PWMReturn;
+  double relationCutoff = 32; //the point at which the PWM relationship doesn't hold
+
+  //quadratic formula co-efficients
+  float a = -0.0108;
+  float b = 4.9083;
+  float c = -74.459 - velocity;
+
+  // Calculate discriminant
+  float discriminant = b * b - 4 * a * c;
+
+  if (discriminant < 0) {
+    Serial.println("No real solutions to PWM conversion returning 0 PWM");
+    return 0;
+  } else {
+    // Two possible solutions for x
+    float x1 = (-b + sqrt(discriminant)) / (2 * a);
+    float x2 = (-b - sqrt(discriminant)) / (2 * a);
+
+    if(x1 < x2){
+      PWMReturn = x1;
+    }else{
+      PWMReturn = x2;
+    }
+  }
+
+  //if the PWM value is less than the cutoff point set it to the cutoff point
+  if(PWMReturn < relationCutoff){
+    PWMReturn = relationCutoff;
+  }
+
+  //if the velocity request was negative we need to flip the calculation back to negative PWM
+  if(posVelocityRequest){
+    PWMReturn = -PWMReturn;
+  }
+
+  return PWMReturn;
 }
 
 void setup() {
@@ -611,8 +661,14 @@ void loop() {
     // M1_Pos_setpoint = testTargetPOSPID;
     // M2_Pos_setpoint = testTargetPOSPID;
   }
+  velocityTest();
+  // DCMotorTest();
 
   // takeOffTest();
+
+
+
+  
 
   // VelPIDCalculation();
 
