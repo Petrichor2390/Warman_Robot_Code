@@ -43,3 +43,30 @@
 //   Serial.println(z_rotation);
 
 // }
+
+
+
+
+
+//old velocity calc from inside velPID keeping here for safekeeping
+    // int M1_deltaEncPos = M1_encoderPos - prev_M1_enc_Pos;
+    // int M2_deltaEncPos = M2_encoderPos - prev_M2_enc_Pos;
+
+    // // Serial.print("time_Passed: ");
+    // // Serial.println(time_Passed);
+
+    // // Serial.print("M1_deltaEncPos: ");
+    // // Serial.println(M1_deltaEncPos);
+
+    // //set prev enc pos
+    // prev_M1_enc_Pos = M1_encoderPos;
+    // prev_M2_enc_Pos = M2_encoderPos;
+
+    // //calculate vel and convert from enc ticks/ms to rotations/s
+    // double M1_Vel = ((double)M1_deltaEncPos / time_Passed) * 1000 * 60 / enc_Ticks_Per_Rot;
+    // double M2_Vel = ((double)M2_deltaEncPos / time_Passed) * 1000 * 60 / enc_Ticks_Per_Rot;
+
+
+    // //saving vel for print and data logging
+    // M1_Vel_Save = M1_Vel;
+    // M2_Vel_Save = M2_Vel;

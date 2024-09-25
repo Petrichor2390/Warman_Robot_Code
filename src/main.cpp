@@ -52,7 +52,7 @@ volatile bool M2_lastB = LOW;
 #define M2_EN 11//ENB
 
 //DUAL CORE operation varaibles
-TaskHandle_t Core2Task;
+TaskHandle_t Core0Task;
 
 //ACTION buton
 #define ACTION_BUTTON_PIN 40
@@ -234,8 +234,10 @@ void printPID(bool bypass = false){
       Serial.print(M1_Vel_Save);
       Serial.print(",Target:");
       Serial.print(testTargetVelPID);
-      Serial.print(",Output:");
+      Serial.print(",PWMM1:");
       Serial.print(M1_Current_PWM);
+      Serial.print(",M1VelPIDOut:");
+      Serial.print(M1_Vel_output);
       Serial.print("\r\n");
     }else{
       Serial.print(">M1_Vel:");
@@ -249,6 +251,8 @@ void printPID(bool bypass = false){
       Serial.print(",M2encPos:");
       Serial.print(M2_encoderPos/10);
       Serial.print(",M1PWM:");
+      Serial.print(M1_Current_PWM);
+      Serial.print(",VelPIDOut:");
       Serial.print(M1_Vel_output);
       Serial.print("\r\n");
     }
@@ -303,98 +307,33 @@ void VelPIDCalculation(){
   long int current_Time = micros();
   double time_Passed = (current_Time - prev_Vel_PID_Time)/1000; //convert from micros to millis
 
-  //avoid div 0 and too small increments
+  //avoid to small increments and increase repeatability
   if (time_Passed < 5) {
     return; 
   }else{
     PosPIDCalculation(testingVelPID); //bypass = true - skipping for vel pid calc
-
     prev_Vel_PID_Time = current_Time;
-
-    int M1_deltaEncPos = M1_encoderPos - prev_M1_enc_Pos;
-    int M2_deltaEncPos = M2_encoderPos - prev_M2_enc_Pos;
-
-    // Serial.print("time_Passed: ");
-    // Serial.println(time_Passed);
-
-    // Serial.print("M1_deltaEncPos: ");
-    // Serial.println(M1_deltaEncPos);
-
-    //set prev enc pos
-    prev_M1_enc_Pos = M1_encoderPos;
-    prev_M2_enc_Pos = M2_encoderPos;
-
-    //calculate vel and convert from enc ticks/ms to rotations/s
-    double M1_Vel = ((double)M1_deltaEncPos / time_Passed) * 1000 * 60 / enc_Ticks_Per_Rot;
-    double M2_Vel = ((double)M2_deltaEncPos / time_Passed) * 1000 * 60 / enc_Ticks_Per_Rot;
-
-
-    //saving vel for print and data logging
-    M1_Vel_Save = M1_Vel;
-    M2_Vel_Save = M2_Vel;
     
+    //input velocity from secondary core calculations
+    M1_Vel_input = M1_Vel_Save;
+    M2_Vel_input = M2_Vel_Save;
+
     //calculate pid output values
-    M1_Vel_input = M1_Vel;
-    M2_Vel_input = M2_Vel;
     M1_Vel_PID.Compute();
     M2_Vel_PID.Compute();
 
-    //logic for setting max increase in PWM values
-    //choosing between max acceleration and low acceleration
-    // double local_Max_Acceleration = 0;
-    // if((abs(M1_Current_PWM) < low_Speed_Cutoff_ForAcceleration_Top) && (abs(M1_Current_PWM) > low_Speed_Cutoff_ForAcceleration_Bottom)){
-    //   local_Max_Acceleration = low_Speed_Acceleration;
-    // }else{
-    //   local_Max_Acceleration = max_Acceleration;
-    // }
+    //convert velocity request to corresponding PWM reponse
+    int M1_PWM_Out = velocityToPWM(M1_Vel_output);
+    int M2_PWM_Out = velocityToPWM(M2_Vel_output);
 
-    // //M1
-    // if(abs(M1_Vel_output - M1_Current_PWM) > local_Max_Acceleration){
-    //   if(M1_Vel_output > M1_Current_PWM){
-    //     M1_Current_PWM += local_Max_Acceleration;
-    //   }else{
-    //     M1_Current_PWM -= local_Max_Acceleration;
-    //   }
-    // }else{
-    //   M1_Current_PWM = M1_Vel_output;
-    // }
+    //send PWM to drivetrain
+    actuateDriveTrain(M1_PWM_Out, M2_PWM_Out);
 
-    // //M2
-    // if(abs(M2_Vel_output - M2_Current_PWM) > local_Max_Acceleration){
-    //   if(M2_Vel_output > M2_Current_PWM){
-    //     M2_Current_PWM += local_Max_Acceleration;
-    //   }else{
-    //     M2_Current_PWM -= local_Max_Acceleration;
-    //   }
-    // }else{
-    //   M2_Current_PWM = M2_Vel_output;
-    // }
-
-    // PWM deadband filter
-    // double deadbandPWM = 25;
-    // double noiseAllowance = 5;
-    // if(M1_Current_PWM > noiseAllowance || M1_Current_PWM < -noiseAllowance){
-    //   if(M1_Current_PWM > 0 && M1_Current_PWM < deadbandPWM){
-    //     M1_Current_PWM = deadbandPWM;
-    //   }
-    //   if(M1_Current_PWM < 0 && M1_Current_PWM > -deadbandPWM){
-    //     M1_Current_PWM = -deadbandPWM;
-    //   }
-    // }
-    // if(M2_Current_PWM > noiseAllowance || M2_Current_PWM < -noiseAllowance){
-    //   if(M2_Current_PWM > 0 && M2_Current_PWM < deadbandPWM){
-    //     M2_Current_PWM = deadbandPWM;
-    //   }
-    //   if(M2_Current_PWM < 0 && M2_Current_PWM > -deadbandPWM){
-    //     M2_Current_PWM = -deadbandPWM;
-    //   }
-    // }
-
-    actuateDriveTrain(M1_Vel_output, M2_Vel_output);
-
-    // delay(100);
+    //save PWM values for logging and printing
+    M1_Current_PWM = M1_PWM_Out;
+    M2_Current_PWM = M2_PWM_Out;
+    
     printPID(testingVelPID);
-    // delay(5);
   }
 }
 
@@ -526,7 +465,7 @@ void velocityTest(){
   }
 }
 
-double velocityToPWM(double velocity){
+int velocityToPWM(double velocity){
   //input velocity in rpm
 
   bool posVelocityRequest;
@@ -573,7 +512,45 @@ double velocityToPWM(double velocity){
     PWMReturn = -PWMReturn;
   }
 
-  return PWMReturn;
+  return int(PWMReturn);
+}
+
+void core0Loop(void * pvParameters) {
+    long int current_Time = micros();
+    long int prev_Time = micros();
+    while (true) {
+        // Serial.println("core 0 printing");
+        // delay(100);  // Add some delay to prevent watchdog timeout
+
+        //velocity calculation
+        long int current_Time = micros();
+        double time_Passed = (current_Time - prev_Time)/1000; //convert from micros to millis
+        if (time_Passed > 5){ //enough time has passed to get a decent sample of velocity
+          //setting prev_time to time now as calculating is occcuring now
+          prev_Time = micros();
+
+          //find change in position  
+          int M1_deltaEncPos = M1_encoderPos - prev_M1_enc_Pos;
+          int M2_deltaEncPos = M2_encoderPos - prev_M2_enc_Pos;
+
+          //save new enc pos as old for next loop
+          prev_M1_enc_Pos = M1_encoderPos;
+          prev_M2_enc_Pos = M2_encoderPos;
+
+          // Serial.print("time_Passed: ");
+          // Serial.println(time_Passed);
+
+          // Serial.print("M1_deltaEncPos: ");
+          // Serial.println(M1_deltaEncPos);
+
+          //calculate velocity and save to global variable
+          double M1_Vel_Save = ((double)M1_deltaEncPos / time_Passed) * 1000 * 60 / enc_Ticks_Per_Rot;
+          double M2_Vel_Save = ((double)M2_deltaEncPos / time_Passed) * 1000 * 60 / enc_Ticks_Per_Rot;
+        }
+
+        //stability/not really sure if this is needed
+        delay(1);
+    }
 }
 
 void setup() {
@@ -642,8 +619,8 @@ void setup() {
 
   //initiate core2loop
   xTaskCreatePinnedToCore(
-    core2Loop,
-    "core2loop",
+    core0Loop,
+    "core0loop",
     2000, //stack size, if we get overflow errors this needs to be increased
     NULL,
     1,
@@ -655,13 +632,13 @@ void setup() {
 void loop() {
   // calcRollingAvg();
   if(loopNo==0){
-    actionButtonWait();
+    // actionButtonWait();
 
     // //PID target for testing
     // M1_Pos_setpoint = testTargetPOSPID;
     // M2_Pos_setpoint = testTargetPOSPID;
   }
-  velocityTest();
+  // velocityTest();
   // DCMotorTest();
 
   // takeOffTest();
@@ -672,7 +649,7 @@ void loop() {
 
   // VelPIDCalculation();
 
-  Serial.println("running on core 1");
+  Serial.println("core 1 printing");
 
   delay(100);
   loopNo++;  
