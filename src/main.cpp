@@ -51,6 +51,9 @@ volatile bool M2_lastB = LOW;
 #define M2_IN2 9 //on motor controller this in IN4
 #define M2_EN 11//ENB
 
+//DUAL CORE operation varaibles
+TaskHandle_t Core2Task;
+
 //ACTION buton
 #define ACTION_BUTTON_PIN 40
 int action_ButtonState = LOW;
@@ -516,6 +519,13 @@ void velocityTest(){
   }
 }
 
+void core2Loop(void * parameter){
+  while(true){
+    delay(100);
+    Serial.println("running on core 0");
+  }
+}
+
 void setup() {
   Serial.begin(115200);
 
@@ -580,7 +590,16 @@ void setup() {
     M2_Rolling_Avg_Vel_Values[i] = 0;
   }
 
-
+  //initiate core2loop
+  xTaskCreatePinnedToCore(
+    core2Loop,
+    "core2loop",
+    2000, //stack size, if we get overflow errors this needs to be increased
+    NULL,
+    1,
+    NULL,
+    0 //void loop by deafault runs on core 1 so we use core 0
+  );
 }
 
 void loop() {
@@ -593,9 +612,12 @@ void loop() {
     // M2_Pos_setpoint = testTargetPOSPID;
   }
 
-  takeOffTest();
+  // takeOffTest();
 
   // VelPIDCalculation();
 
+  Serial.println("running on core 1");
+
+  delay(100);
   loopNo++;  
 }
