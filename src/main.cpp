@@ -51,8 +51,18 @@ volatile bool M2_lastB = LOW;
 #define M2_IN2 9 //on motor controller this in IN4
 #define M2_EN 11//ENB
 
+//IMU pins
+#define SDA_PIN 47
+#define SCL_PIN 21
+
 //DUAL CORE operation varaibles
 TaskHandle_t Core0Task;
+
+//IMU variables
+Adafruit_LSM6DSOX sox;
+double z_Vel = 0; //negative when M2 too fast, positive when M2 too slow vise versa for reverse
+sensors_event_t accel, gyro, temp;
+double z_Error = 0;
 
 //ACTION buton
 #define ACTION_BUTTON_PIN 40
@@ -127,6 +137,7 @@ double testTargetVelPID = 200; //in rpm
 double testTargetPOSPID = 1.2; //in meters
 bool testingVelPID = false; //true if testing vel pid false if running position PIDs
 bool printPIDtesting = true; //true if you want PID to print, false if you want no pid to print
+bool IMUTesting = true; //true if you only want IMU to print
 long int brakeTime = 3500; //2 seconds after the button is pressed brake
 long int buttonPressTime = 0;
 bool printMotorVelError = false;
@@ -302,49 +313,59 @@ int velocityToPWM(double velocity){
 }
 
 void printPID(bool bypass = false){
-  if(!printMotorVelError){
-    if(printPIDtesting){
-      if(bypass){
-        Serial.print(">M1_Vel:");
-        Serial.print(M1_Vel_Save);
-        Serial.print(",M2_Vel:");
-        Serial.print(M2_Vel_Save);
-        Serial.print(",Target:");
-        Serial.print(testTargetVelPID);
-        Serial.print(",PWMM1:");
-        Serial.print(M1_Current_PWM);
-        Serial.print(",PWMM2:");
-        Serial.print(M2_Current_PWM);
-        Serial.print(",M1VelPIDOut:");
-        Serial.print(M1_Vel_output);
-        Serial.print(",M2VelPIDOut:");
-        Serial.print(M2_Vel_output);
-        Serial.print(",M1_Rolling_Avg_Vel:");
-        Serial.print(M1_Rolling_Avg_Vel);
-        Serial.print("\r\n");
-      }else{
-        Serial.print(">M1_Vel:");
-        Serial.print(M1_Vel_Save);
-        Serial.print(",POSPID Target:");
-        Serial.print(testTargetPOSPID/10);
-        Serial.print(",POSPID_Out:");
-        Serial.print(M1_Pos_output);
-        Serial.print(",M1encPos:");
-        Serial.print(M1_encoderPos/10);
-        Serial.print(",M2encPos:");
-        Serial.print(M2_encoderPos/10);
-        Serial.print(",M1PWM:");
-        Serial.print(M1_Current_PWM);
-        Serial.print(",VelPIDOut:");
-        Serial.print(M1_Vel_output);
-        Serial.print("\r\n");
+  if(!IMUTesting){
+    if(!printMotorVelError){
+      if(printPIDtesting){
+        if(bypass){
+          Serial.print(">M1_Vel:");
+          Serial.print(M1_Vel_Save);
+          Serial.print(",M2_Vel:");
+          Serial.print(M2_Vel_Save);
+          Serial.print(",Target:");
+          Serial.print(testTargetVelPID);
+          Serial.print(",PWMM1:");
+          Serial.print(M1_Current_PWM);
+          Serial.print(",PWMM2:");
+          Serial.print(M2_Current_PWM);
+          Serial.print(",M1VelPIDOut:");
+          Serial.print(M1_Vel_output);
+          Serial.print(",M2VelPIDOut:");
+          Serial.print(M2_Vel_output);
+          Serial.print(",M1_Rolling_Avg_Vel:");
+          Serial.print(M1_Rolling_Avg_Vel);
+          Serial.print(",z_Vel:");
+          Serial.print(z_Vel);
+          Serial.print("\r\n");
+        }else{
+          Serial.print(">M1_Vel:");
+          Serial.print(M1_Vel_Save);
+          Serial.print(",POSPID Target:");
+          Serial.print(testTargetPOSPID/10);
+          Serial.print(",POSPID_Out:");
+          Serial.print(M1_Pos_output);
+          Serial.print(",M1encPos:");
+          Serial.print(M1_encoderPos/10);
+          Serial.print(",M2encPos:");
+          Serial.print(M2_encoderPos/10);
+          Serial.print(",M1PWM:");
+          Serial.print(M1_Current_PWM);
+          Serial.print(",VelPIDOut:");
+          Serial.print(M1_Vel_output);
+          Serial.print(",z_Vel:");
+          Serial.print(z_Vel);
+          Serial.print("\r\n");
+        }
       }
+    }else{
+      velError = M1_Vel_Save - M2_Vel_Save;
+      Serial.print(">VelError:");
+      Serial.print(velError);
+      Serial.print("\r\n");
     }
   }else{
-    velError = M1_Vel_Save - M2_Vel_Save;
-    Serial.print(">VelError:");
-    Serial.print(velError);
-    Serial.print("\r\n");
+      Serial.print(">z_Vel:");
+      Serial.print(z_Vel);
+      Serial.print("\r\n");
   }
 }
 
@@ -391,6 +412,27 @@ void PosPIDCalculation(bool bypass = false){
     if(abs(M2_Pos_output-prev_M2_Pos_output) > max_Pos_Output_change){
       if(M2_Pos_output > prev_M2_Pos_output){
         M2_Pos_output = prev_M2_Pos_output + max_Pos_Output_change;
+      }
+    }
+
+    //modify position output based on IMU
+    double IMU_p = 1.2; //test to validate
+    double IMU_Kp = z_Vel*IMU_p/2;
+    bool IMU_Adjust_Active = false;
+
+    //find if we are moving in a direction
+    if((M1_Pos_output*M2_Pos_output > 0)){
+      IMU_Adjust_Active = true;
+    }
+
+    //if positive turning to the right
+    if(IMU_Adjust_Active){
+      if(IMU_Kp > 0){ //decrease M1 increase M2
+        M1_Pos_output -= IMU_Kp;
+        M2_Pos_output += IMU_Kp;
+      }else{
+        M1_Pos_output += IMU_Kp;
+        M2_Pos_output -= IMU_Kp;
       }
     }
 
@@ -613,54 +655,91 @@ void velocityTest(){
   }
 }
 
+void IMUUpdate(){
+  sox.getEvent(&accel, &gyro, &temp);
+  z_Vel = gyro.gyro.z * 180.0 / PI - z_Error;
+  // Serial.println(z_Vel);
+}
+
+void IMUerrorCalc(){
+  delay(200);
+  double sum = 0;
+  int tests = 10;
+  z_Error = 0;
+
+  //grab test data
+  for(int i = 0; i < tests; i++){
+    IMUUpdate();
+    sum += z_Vel;
+    delay(10);
+  }
+
+  //calculating error
+  z_Error = sum/tests;
+}
+
 void core0Loop(void * pvParameters) {
-    long int current_Time = micros();
-    long int prev_Time = micros();
-    while (true) {
-        // Serial.println("core 0 printing");
-        // delay(100);  // Add some delay to prevent watchdog timeout
+  long int current_Time = micros();
+  long int prev_Time = micros();
+  while (true) {
+      // Serial.println("core 0 printing");
+      // delay(100);  // Add some delay to prevent watchdog timeout
+      IMUUpdate();
 
-        //velocity calculation
-        long int current_Time = micros();
-        double time_Passed = (current_Time - prev_Time)/1000; //convert from micros to millis
-        if (time_Passed > 15){ //enough time has passed to get a decent sample of velocity
-          //setting prev_time to time now as calculating is occcuring now
-          prev_Time = micros();
+      //velocity calculation
+      long int current_Time = micros();
+      double time_Passed = (current_Time - prev_Time)/1000; //convert from micros to millis
+      if (time_Passed > 15){ //enough time has passed to get a decent sample of velocity
+        //setting prev_time to time now as calculating is occcuring now
+        prev_Time = micros();
 
-          //find change in position  
-          int M1_deltaEncPos = M1_encoderPos - prev_M1_enc_Pos;
-          int M2_deltaEncPos = M2_encoderPos - prev_M2_enc_Pos;
+        //find change in position  
+        int M1_deltaEncPos = M1_encoderPos - prev_M1_enc_Pos;
+        int M2_deltaEncPos = M2_encoderPos - prev_M2_enc_Pos;
 
-          //save new enc pos as old for next loop
-          prev_M1_enc_Pos = M1_encoderPos;
-          prev_M2_enc_Pos = M2_encoderPos;
+        //save new enc pos as old for next loop
+        prev_M1_enc_Pos = M1_encoderPos;
+        prev_M2_enc_Pos = M2_encoderPos;
 
-          // Serial.print("time_Passed: ");
-          // Serial.println(time_Passed);
+        // Serial.print("time_Passed: ");
+        // Serial.println(time_Passed);
 
-          // Serial.print("M1_deltaEncPos: ");
-          // Serial.println(M1_deltaEncPos);
+        // Serial.print("M1_deltaEncPos: ");
+        // Serial.println(M1_deltaEncPos);
 
-          //calculate velocity and save to global variable
-          M1_Vel_Save = ((double)M1_deltaEncPos / time_Passed) * 1000 * 60 / enc_Ticks_Per_Rot;
-          M2_Vel_Save = ((double)M2_deltaEncPos / time_Passed) * 1000 * 60 / enc_Ticks_Per_Rot;
+        //calculate velocity and save to global variable
+        M1_Vel_Save = ((double)M1_deltaEncPos / time_Passed) * 1000 * 60 / enc_Ticks_Per_Rot;
+        M2_Vel_Save = ((double)M2_deltaEncPos / time_Passed) * 1000 * 60 / enc_Ticks_Per_Rot;
 
-          //vel save has changed now calculate the rolling average again with the change
-          calcRollingAvg();
+        //vel save has changed now calculate the rolling average again with the change
+        calcRollingAvg();
 
-          // Serial.print("M1_Vel: ");
-          // Serial.println(M1_Vel_Save);
-        }
+        // Serial.print("M1_Vel: ");
+        // Serial.println(M1_Vel_Save);
+      }
 
-        //stability/not really sure if this is needed
-        delay(1);
-    }
+      //stability/not really sure if this is needed
+      delay(1);
+  }
 }
 
 void setup() {
   Serial.begin(115200);
 
-  //encoder pin setup
+  //IMU SETUP ########################
+  Wire.begin(SDA_PIN, SCL_PIN);
+  // Initialize I2C
+  while(!sox.begin_I2C(0x6A)){
+  Serial.println("Failed to find LSM6DSOX chip");
+  delay(10);
+  // while (1);
+  }
+  Serial.println("LSM6DSOX Found!");
+
+  //running to find systematic error
+  IMUerrorCalc();
+
+  //encoder pin setup#########################
   //M1
   pinMode(M1_ENCODER_PIN_A, INPUT);
   pinMode(M1_ENCODER_PIN_B, INPUT);
@@ -668,7 +747,7 @@ void setup() {
   pinMode(M2_ENCODER_PIN_A, INPUT);
   pinMode(M2_ENCODER_PIN_B, INPUT);
 
-  // Attach interrupts to the encoder pins
+  // Attach interrupts to the encoder pins###################
   //M1
   attachInterrupt(digitalPinToInterrupt(M1_ENCODER_PIN_A), M1handleEncoderA, CHANGE);
   attachInterrupt(digitalPinToInterrupt(M1_ENCODER_PIN_B), M1handleEncoderB, CHANGE);
@@ -757,5 +836,5 @@ void loop() {
 
 
   delay(1);
-  loopNo++;  
+  loopNo++;
 }
