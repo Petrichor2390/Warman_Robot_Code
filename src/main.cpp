@@ -112,23 +112,43 @@ double prev_M2_Pos_output = 0;
 double max_Pos_Output_change = 20;
 
 //process operation variables i.e. goals and order of operation ##############################
-bool goalReached = false; //true if the current goal has been reached
-int currentGoalIndex = 0; //the index of the current goal in the goal list
-double targetPosition[] = {
+//movement positions
+bool posGoalReached = true; //true if the current goal has been reached - starts as true to avoid startup issues
+int currentPosGoalIndex = -1; //-1 for no goal assigned yet, the index of the current goal in the goal list
+double posTargetPosition[] = {
   0.6,
   1.2
 };
+
+//arm positions
+bool armGoalReached = true; //true if the arm goal has been reached - starts as true to avoid startup issues
+int currentArmGoalIndex = -1; //-1 for no goal assigned yet
+int pillarLowPos = 0; //find these values through testing
+int pillarHighPos = 0;
+int floorRHS = 0;
+int floorLHS = 0;
+int armTargetPosition[] = { //example values
+  pillarLowPos,
+  pillarHighPos,
+  floorRHS
+};
+
+//main instructions
 int currentInstructionIndex = 0;
+bool currentInstructionStarted = false;
+int instructionRegistry[2][2] = {
+  {1,0},
+  {1,0}
+};
 
-// int instructionRegistry[][] = {
-//   {}
-// };
-
-//instruction registry leged
+//instruction registry legend
 //first number
   //1 = move to next position in goal list
-  //2 = move arm to next position in armGoal list
-  //3 = actuate servos
+  //2 = actuate servos
+  //3 = delay
+//second number
+  //1 = move arm to next position in goal list
+
 
 //temporary variables used for testing purposes
 int loopNo = 0;
@@ -539,10 +559,13 @@ void VelPIDCalculation(){
   }
 }
 
-bool goalManager(){
-  //temporary logic for testing a single goal for now
-  double pos_Tolerance = metersToEncTicks(0.005); 
+bool posGoalManager(){
 
+  //run the PID
+  VelPIDCalculation();
+
+  //check if the robot is within tolerance of the goal
+  double pos_Tolerance = metersToEncTicks(0.005); //5mm tolerance
   bool ret = false;
   //if both motors are within tolerance then brake and consider the goal reached
   if(abs(M1_encoderPos - M1_Pos_setpoint) < pos_Tolerance && abs(M2_encoderPos - M2_Pos_setpoint) < pos_Tolerance){
@@ -550,6 +573,10 @@ bool goalManager(){
     ret = true;
   }
   return ret;
+}
+
+bool armGoalManager(){
+  return true; //placeholder - plan to return true only if the arm has reached it's final position otherwise move the arm one step towards the position
 }
 
 void actionButtonWait(bool print = true){
@@ -704,9 +731,45 @@ void IMUerrorCalc(){
 }
 
 void instructionRegisterManager(){
-  bool reached = goalManager();
-  if(reached){
+  if(!currentInstructionStarted){
+    //run the current instruction
+    switch (instructionRegistry[currentInstructionIndex][0]){
+      case 1:
+        currentPosGoalIndex += 1;
+        posGoalReached = false;
+        M1_Pos_setpoint = metersToEncTicks(posTargetPosition[currentPosGoalIndex]);
+        M2_Pos_setpoint = metersToEncTicks(posTargetPosition[currentPosGoalIndex]);
+        break;
 
+      case 2:
+        //run servo unfolding function
+        break;
+
+      case 3:
+        //run servo unfolding function
+        break;
+      
+      default:
+        break;
+    }
+
+    //tell armGoalManager to start moving the arm
+    if(instructionRegistry[currentInstructionIndex][1] == 1){
+      currentArmGoalIndex += 1;
+      armGoalReached = false;
+    }
+
+    currentInstructionStarted = true;
+  }
+
+  //move the robot and the arm
+  posGoalReached = posGoalManager();
+  armGoalReached = armGoalManager();
+
+  //if they have both been reached we can move onto the next instruction
+  if(posGoalReached && armGoalReached){
+    currentInstructionIndex += 1; //go to the next instruction
+    currentInstructionStarted = false;
   }
 }
 
@@ -854,18 +917,19 @@ void loop() {
     actionButtonWait();
 
     // //PID target for testing
-    testTargetPOSPID = metersToEncTicks(testTargetPOSPID);
+    // testTargetPOSPID = metersToEncTicks(testTargetPOSPID);
 
-    if(!testingVelPID){
-      M1_Pos_setpoint = testTargetPOSPID;
-      M2_Pos_setpoint = testTargetPOSPID;
-    }
+    // if(!testingVelPID){
+    //   M1_Pos_setpoint = testTargetPOSPID;
+    //   M2_Pos_setpoint = testTargetPOSPID;
+    // }
   }
   
-
-  VelPIDCalculation();
-  goalManager();
+  //find the current instructions
   instructionRegisterManager();
+
+  //run the PID calculation
+  VelPIDCalculation();
 
 
   delay(1);
