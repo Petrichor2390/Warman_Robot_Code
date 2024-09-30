@@ -122,7 +122,7 @@ bool roll_Avg_Filled = false;
 //input = position from encoders, output = setpoint for Velocity PID (range from -300 to 300), setpoint = targets on the track
 double M1_Pos_input, M1_Pos_output, M1_Pos_setpoint;
 double M2_Pos_input, M2_Pos_output, M2_Pos_setpoint;
-double Pos_Kp = 0.09, Pos_Ki = 0, Pos_Kd = 0.0; //p = 0.08
+double Pos_Kp = 0.11, Pos_Ki = 0, Pos_Kd = 0.02; //p = 0.09
 
 PID M1_Pos_PID(&M1_Pos_input, &M1_Pos_output, &M1_Pos_setpoint, Pos_Kp, Pos_Ki, Pos_Kd, DIRECT);
 PID M2_Pos_PID(&M2_Pos_input, &M2_Pos_output, &M2_Pos_setpoint, Pos_Kp, Pos_Ki, Pos_Kd, DIRECT);
@@ -134,10 +134,10 @@ double max_Pos_Output_change = 20;
 //temporary variables used for testing purposes
 int loopNo = 0;
 double testTargetVelPID = 200; //in rpm
-double testTargetPOSPID = 1.2; //in meters
+double testTargetPOSPID = 0.6; //in meters
 bool testingVelPID = false; //true if testing vel pid false if running position PIDs
 bool printPIDtesting = true; //true if you want PID to print, false if you want no pid to print
-bool IMUTesting = true; //true if you only want IMU to print
+bool IMUTesting = false; //true if you only want IMU to print
 long int brakeTime = 3500; //2 seconds after the button is pressed brake
 long int buttonPressTime = 0;
 bool printMotorVelError = false;
@@ -274,7 +274,7 @@ int velocityToPWM(double velocity){
   }
   
   double PWMReturn;
-  double relationCutoff = 34; //the point at which the PWM relationship doesn't hold //was 32 but the robot would sometimes stop at this PWM
+  double relationCutoff = 60; //the point at which the PWM relationship doesn't hold //was 32 but the robot would sometimes stop at this PWM
 
   //quadratic formula co-efficients
   float a = -0.0108;
@@ -349,10 +349,12 @@ void printPID(bool bypass = false){
           Serial.print(M2_encoderPos/10);
           Serial.print(",M1PWM:");
           Serial.print(M1_Current_PWM);
+          Serial.print(",M2PWM:");
+          Serial.print(M2_Current_PWM);
           Serial.print(",VelPIDOut:");
           Serial.print(M1_Vel_output);
           Serial.print(",z_Vel:");
-          Serial.print(z_Vel);
+          Serial.print(z_Vel*10);
           Serial.print("\r\n");
         }
       }
@@ -416,24 +418,19 @@ void PosPIDCalculation(bool bypass = false){
     }
 
     //modify position output based on IMU
-    double IMU_p = 1.2; //test to validate
-    double IMU_Kp = z_Vel*IMU_p/2;
-    bool IMU_Adjust_Active = false;
+    double IMU_p = -2.7; //test to validate
+    double IMU_Kp = (z_Vel*IMU_p)/2;
+    bool IMU_Adjust_Active = true;
 
-    //find if we are moving in a direction
-    if((M1_Pos_output*M2_Pos_output > 0)){
-      IMU_Adjust_Active = true;
+    // //find if we within a tolerance of the setpoint
+    if((abs(M1_Pos_setpoint-M1_Pos_input) < metersToEncTicks(0.1))){
+      IMU_Adjust_Active = false;
     }
 
     //if positive turning to the right
     if(IMU_Adjust_Active){
-      if(IMU_Kp > 0){ //decrease M1 increase M2
-        M1_Pos_output -= IMU_Kp;
-        M2_Pos_output += IMU_Kp;
-      }else{
-        M1_Pos_output += IMU_Kp;
-        M2_Pos_output -= IMU_Kp;
-      }
+      M1_Pos_output -= IMU_Kp;
+      M2_Pos_output += IMU_Kp;
     }
 
     //set Vel PID setpoint to Pos PID output
@@ -461,6 +458,17 @@ void VelPIDCalculation(){
   }else{
     PosPIDCalculation(testingVelPID); //bypass = true - skipping for vel pid calc
     prev_Vel_PID_Time = current_Time;
+
+    //check for too small velocity request
+    double velCuttoff = 2;
+    bool M1_cutt = false;
+    bool M2_cutt = false;
+    if(abs(M1_Vel_setpoint) < velCuttoff){
+      M1_cutt = true;
+    }
+    if(abs(M2_Vel_setpoint) < velCuttoff){
+      M2_cutt = true;
+    }
     
     //input velocity from secondary core calculations
     M1_Vel_input = double(M1_Vel_Save);
@@ -477,10 +485,9 @@ void VelPIDCalculation(){
     // Serial.println(M1_PWM_Out);
     // Serial.println(M2_PWM_Out);
 
-
     //check for takeoff condition
     double avgPWM = (M1_PWM_Out+M2_PWM_Out)/2;
-    if(abs(M1_Rolling_Avg_Vel) < 10 && abs(M2_Rolling_Avg_Vel) < 10 && abs(avgPWM) < min_Takeoff_PWM){ //not moving and too low PWM to start
+    if(abs(M1_Rolling_Avg_Vel) < 2 && abs(M2_Rolling_Avg_Vel) < 2 && abs(avgPWM) < min_Takeoff_PWM){ //not moving and too low PWM to start
       if(avgPWM > 0){
         M1_PWM_Out = min_Takeoff_PWM;
         M2_PWM_Out = min_Takeoff_PWM;
@@ -490,8 +497,33 @@ void VelPIDCalculation(){
       }
     }
 
+    //check for PWM going the wrong direction - if it is set to previuous PWM value
+    if(M1_Pos_setpoint > M1_Pos_input){ //forward direction - positive PWM
+      if(M1_PWM_Out < 0){
+        M1_PWM_Out = M1_Prev_PWM_Output;
+      }
+      if(M2_PWM_Out < 0){
+        M2_PWM_Out = M2_Prev_PWM_Output;
+      }
+    }else{ //backwards
+      if(M1_PWM_Out > 0){
+        M1_PWM_Out = M1_Prev_PWM_Output;
+      }
+      if(M2_PWM_Out > 0){
+        M2_PWM_Out = M2_Prev_PWM_Output;
+      }
+    }
+
     //send PWM to drivetrain
-    actuateDriveTrain(M1_PWM_Out, M2_PWM_Out);
+    if(M1_cutt == true && M2_cutt == true){
+      actuateDriveTrain(0, 0);
+    }else if(M1_cutt == true && M2_cutt == false){
+      actuateDriveTrain(0, M2_PWM_Out);
+    }else if(M1_cutt == false && M2_cutt == true){
+      actuateDriveTrain(M1_PWM_Out, 0);
+    }else{
+      actuateDriveTrain(M1_PWM_Out, M2_PWM_Out);
+    }
 
     //save PWM values for logging and printing
     M1_Current_PWM = M1_PWM_Out;
@@ -827,12 +859,15 @@ void loop() {
     if(!testingVelPID){
       M1_Pos_setpoint = testTargetPOSPID;
       M2_Pos_setpoint = testTargetPOSPID;
+
+      //for testing new method
+      p_setpoint = testTargetPOSPID;
     }
   }
   
 
   VelPIDCalculation();
-  goalManager();
+  // goalManager();
 
 
   delay(1);
