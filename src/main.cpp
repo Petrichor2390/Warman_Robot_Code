@@ -1,23 +1,3 @@
-//to-do
-/*
-1. Function to test min PWM values for moving from standstill - done needs testing
-  #set PWM output to 20 or so
-  #run for 1s,
-  #wait for button press, when it is pressed increase PWM by 1
-  #run and repeat
-2. Function to test velocity at pwm pwm values. - done needs testing
-  #set PWM value to takeoff PWM for 1s
-  #set PWM to test value - starting from 5 - inc by 5
-  #run for enough time to get steady state speed
-  
-3. Function to test max decelleration and acceleration without slipping
-
-3.Fix the Position targetting
-  option 1: use the 2 PID loops with a bump function where a minium PWM value is pulsed into the system to remove steady state error
-  option 2: use the 2 PID loops but with without libraries so that 
-
-*/
-
 #include <Wire.h>
 #include <Adafruit_LSM6DSOX.h>
 #include <PID_v1.h>
@@ -131,10 +111,29 @@ double prev_M1_Pos_output = 0;
 double prev_M2_Pos_output = 0;
 double max_Pos_Output_change = 20;
 
+//process operation variables i.e. goals and order of operation ##############################
+bool goalReached = false; //true if the current goal has been reached
+int currentGoalIndex = 0; //the index of the current goal in the goal list
+double targetPosition[] = {
+  0.6,
+  1.2
+};
+int currentInstructionIndex = 0;
+
+// int instructionRegistry[][] = {
+//   {}
+// };
+
+//instruction registry leged
+//first number
+  //1 = move to next position in goal list
+  //2 = move arm to next position in armGoal list
+  //3 = actuate servos
+
 //temporary variables used for testing purposes
 int loopNo = 0;
 double testTargetVelPID = 200; //in rpm
-double testTargetPOSPID = 0.6; //in meters
+double testTargetPOSPID = -0.6; //in meters
 bool testingVelPID = false; //true if testing vel pid false if running position PIDs
 bool printPIDtesting = true; //true if you want PID to print, false if you want no pid to print
 bool IMUTesting = false; //true if you only want IMU to print
@@ -142,10 +141,6 @@ long int brakeTime = 3500; //2 seconds after the button is pressed brake
 long int buttonPressTime = 0;
 bool printMotorVelError = false;
 double velError = 0;
-
-//temporary reach goal varaibles
-bool M1_reached = false;
-bool M2_reached = false;
 
 //M1 interupts
 void IRAM_ATTR M1handleEncoderA() {
@@ -231,28 +226,24 @@ void actuateDriveTrain(int M1PWM, int M2PWM, bool brake = false){ //negative PWM
     }
 
     //M1
-    if(!M1_reached){
-      if (M1PWM > 0) {
-        digitalWrite(M1_IN1, HIGH);
-        digitalWrite(M1_IN2, LOW);
-      } else if (M1PWM < 0) {
-        digitalWrite(M1_IN1, LOW);
-        digitalWrite(M1_IN2, HIGH);
-      }
-      analogWrite(M1_EN, int(abs(M1PWM)));
+    if (M1PWM > 0) {
+      digitalWrite(M1_IN1, HIGH);
+      digitalWrite(M1_IN2, LOW);
+    } else if (M1PWM < 0) {
+      digitalWrite(M1_IN1, LOW);
+      digitalWrite(M1_IN2, HIGH);
     }
+    analogWrite(M1_EN, int(abs(M1PWM)));
 
     //M2
-    if(!M2_reached){
-      if (M2PWM > 0) {
-        digitalWrite(M2_IN1, HIGH);
-        digitalWrite(M2_IN2, LOW);
-      } else if (M2PWM < 0) {
-        digitalWrite(M2_IN1, LOW);
-        digitalWrite(M2_IN2, HIGH);
-      }
-      analogWrite(M2_EN, int(abs(M2PWM)));
+    if (M2PWM > 0) {
+      digitalWrite(M2_IN1, HIGH);
+      digitalWrite(M2_IN2, LOW);
+    } else if (M2PWM < 0) {
+      digitalWrite(M2_IN1, LOW);
+      digitalWrite(M2_IN2, HIGH);
     }
+    analogWrite(M2_EN, int(abs(M2PWM)));
   }
 }
 
@@ -405,15 +396,30 @@ void PosPIDCalculation(bool bypass = false){
     M2_Pos_PID.Compute();
 
     //logic for modifing position increases to limit acceleration
-    if(abs(M1_Pos_output-prev_M1_Pos_output) > max_Pos_Output_change){
-      if(M1_Pos_output > prev_M1_Pos_output){
-        M1_Pos_output = prev_M1_Pos_output + max_Pos_Output_change;
-      }
-    }
 
-    if(abs(M2_Pos_output-prev_M2_Pos_output) > max_Pos_Output_change){
-      if(M2_Pos_output > prev_M2_Pos_output){
-        M2_Pos_output = prev_M2_Pos_output + max_Pos_Output_change;
+    if(M1_Pos_setpoint > M1_Pos_input){
+      //forward case
+      if(abs(M1_Pos_output-prev_M1_Pos_output) > max_Pos_Output_change){
+        if(M1_Pos_output > prev_M1_Pos_output){
+          M1_Pos_output = prev_M1_Pos_output + max_Pos_Output_change;
+        }
+      }
+      if(abs(M2_Pos_output-prev_M2_Pos_output) > max_Pos_Output_change){
+        if(M2_Pos_output > prev_M2_Pos_output){
+          M2_Pos_output = prev_M2_Pos_output + max_Pos_Output_change;
+        }
+      }
+    }else{
+      //backwards case
+      if(abs(M1_Pos_output-prev_M1_Pos_output) > max_Pos_Output_change){
+        if(M1_Pos_output < prev_M1_Pos_output){
+          M1_Pos_output = prev_M1_Pos_output - max_Pos_Output_change;
+        }
+      }
+      if(abs(M2_Pos_output-prev_M2_Pos_output) > max_Pos_Output_change){
+        if(M2_Pos_output < prev_M2_Pos_output){
+          M2_Pos_output = prev_M2_Pos_output - max_Pos_Output_change;
+        }
       }
     }
 
@@ -533,30 +539,17 @@ void VelPIDCalculation(){
   }
 }
 
-void goalManager(){
+bool goalManager(){
   //temporary logic for testing a single goal for now
   double pos_Tolerance = metersToEncTicks(0.005); 
-  double vel_Tolerance = 30;
 
-  //if M1 is within range brake
-  if(abs(testTargetPOSPID - M1_encoderPos) < pos_Tolerance && M1_Vel_Save < vel_Tolerance){
-    M1_reached = true;
-    // digitalWrite(M1_IN1, LOW);
-    // digitalWrite(M1_IN2, LOW);
-    Serial.print("motor 1 velocity at stop command: ");
-    Serial.println(M1_Rolling_Avg_Vel);
-    analogWrite(M1_EN, 0);
+  bool ret = false;
+  //if both motors are within tolerance then brake and consider the goal reached
+  if(abs(M1_encoderPos - M1_Pos_setpoint) < pos_Tolerance && abs(M2_encoderPos - M2_Pos_setpoint) < pos_Tolerance){
+    actuateDriveTrain(0,0,true);
+    ret = true;
   }
-
-  //if M2 is within range brake
-  if(abs(testTargetPOSPID - M2_encoderPos) < pos_Tolerance && M2_Vel_Save < vel_Tolerance){
-    M2_reached = true;
-    // digitalWrite(M2_IN1, LOW);
-    // digitalWrite(M2_IN2, LOW);
-    Serial.print("motor 2 velocity at stop command: ");
-    Serial.println(M2_Rolling_Avg_Vel);
-    analogWrite(M2_EN, 0);
-  }
+  return ret;
 }
 
 void actionButtonWait(bool print = true){
@@ -710,6 +703,13 @@ void IMUerrorCalc(){
   z_Error = sum/tests;
 }
 
+void instructionRegisterManager(){
+  bool reached = goalManager();
+  if(reached){
+
+  }
+}
+
 void core0Loop(void * pvParameters) {
   long int current_Time = micros();
   long int prev_Time = micros();
@@ -859,15 +859,13 @@ void loop() {
     if(!testingVelPID){
       M1_Pos_setpoint = testTargetPOSPID;
       M2_Pos_setpoint = testTargetPOSPID;
-
-      //for testing new method
-      p_setpoint = testTargetPOSPID;
     }
   }
   
 
   VelPIDCalculation();
-  // goalManager();
+  goalManager();
+  instructionRegisterManager();
 
 
   delay(1);
