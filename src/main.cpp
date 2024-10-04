@@ -1,6 +1,8 @@
 #include <Wire.h>
 #include <Adafruit_LSM6DSOX.h>
 #include <PID_v1.h>
+#include <FastAccelStepper.h>
+#include <ESP32Servo.h>
 
 //ENCODERs###################################################################
 //M1
@@ -9,6 +11,32 @@
 //M2
 #define M2_ENCODER_PIN_A 17 // Encoder pin A for motor 2
 #define M2_ENCODER_PIN_B 18 // Encoder pin B for motor 2
+
+//STEPPER###################################################
+#define STEP_PIN 7 //called PUL on the TB6600
+#define DIR_PIN 6
+// Create an instance of the FastAccelStepperEngine
+FastAccelStepperEngine engine;
+// Create a pointer to the stepper
+FastAccelStepper *stepper = NULL;
+
+//SERVOS#########################################################
+#define SERVO_LINK1_PIN 39
+#define SERVO_LINK2_PIN 38
+Servo servoLink1;
+Servo servoLink2;
+
+int servoLink1_Starting_Angle = 180;
+int servoLink2_Starting_Angle = 5;
+
+int servoLink1_Finish_Angle = 17;
+int servoLink2_Finish_Angle = 180;
+
+int servoLink1_Maintain_Angle = 18;
+int servoLink2_Maintain_Angle = 177;
+
+int servoLink1_startL2_Angle = 40;
+
 
 //encoder variables that carry over through interrupts
 //M1
@@ -117,7 +145,8 @@ bool posGoalReached = true; //true if the current goal has been reached - starts
 int currentPosGoalIndex = -1; //-1 for no goal assigned yet, the index of the current goal in the goal list
 double posTargetPosition[] = {
   0.6,
-  1.2
+  1.2,
+  0
 };
 
 //arm positions
@@ -136,7 +165,8 @@ int armTargetPosition[] = { //example values
 //main instructions
 int currentInstructionIndex = 0;
 bool currentInstructionStarted = false;
-int instructionRegistry[2][2] = {
+int instructionRegistry[3][2] = {
+  {1,0},
   {1,0},
   {1,0}
 };
@@ -402,6 +432,104 @@ void DCMotorTest(){
   Serial.println("M1 BACKWARDS");
   actuateDriveTrain(0, -255);
   delay(del);
+}
+
+void StepperTest(){
+  // stepper.moveTo(1450);
+  // delay(2000);
+  // stepper.moveTo(-1450);
+  // delay(2000);
+  // stepper.moveTo(0);
+  // delay(2000);
+
+  stepper->moveTo(1450);
+  delay(5000);
+  stepper->moveTo(-1450);
+  delay(5000);
+  stepper->moveTo(0);
+  delay(5000);
+
+
+}
+
+void ServoTest(){
+  //L1 start at 180
+  //L1 finish at 17
+  //L1 maintain at 18
+
+  //L2 start at 5
+  //L2 finish at 177
+  //L2 maintain at 176
+
+
+  //move L1
+  // int angleL1;
+  // int angleL2;
+  // for (angleL1 = servoLink1_Starting_Angle; angleL1 >= servoLink1_Finish_Angle; angleL1 -= 1) {  
+  //   servoLink1.write(angleL1);  // Set the servo to the current angle
+  //   delay(10);  // Wait for the servo to reach the position
+  // }
+  
+  //move L2
+  // for (angleL2 = servoLink2_Starting_Angle; angleL2 <= servoLink2_Finish_Angle; angleL2 += 1) {  
+  //   servoLink2.write(angleL2);  // Set the servo to the current angle
+  //   delay(3);  // Wait for the servo to reach the position
+  // }
+
+  int angleL1 = servoLink1_Starting_Angle;
+  int angleL2 = servoLink2_Starting_Angle;
+
+  bool L1_Reached = false;
+  bool L2_Reached = false;
+  bool L2_Active = false;
+
+  int loopCount = 0;
+  while(!L1_Reached || !L2_Reached){
+    //condition for if L2 is active
+    if(angleL1 <= servoLink1_startL2_Angle){
+      L2_Active = true;
+    }
+
+    //move target angle L1
+    if(!L1_Reached){
+      if(loopCount % 3 == 0){ //every 3rd loop move the L1 link
+        angleL1 -= 1;
+      }
+    }
+
+    //move target angle L1
+    if(!L2_Reached && L2_Active){
+      angleL2 += 1;
+    }
+
+    //actuate servos
+    servoLink1.write(angleL1);
+    //only actuate L2 if active
+    if(L2_Active){
+      servoLink2.write(angleL2);
+    }
+
+
+    //condition for if servo's have reached their positions
+    if(angleL1 <= servoLink1_Finish_Angle){
+      L1_Reached = true;
+    }
+    if(angleL2 >= servoLink2_Finish_Angle){
+      L2_Reached = true;
+    }
+
+    delayMicroseconds(3300); //equal to delay(3.3)
+    loopCount++;
+  }
+
+
+
+  // servoLink1.write(servoLink1_Maintain_Angle);
+  // servoLink2.write(servoLink2_Maintain_Angle);
+
+  // delay(10000);
+  // servoLink1.write(servoLink1_Starting_Angle);
+  // servoLink2.write(servoLink2_Starting_Angle);
 }
 
 void PosPIDCalculation(bool bypass = false){
@@ -733,33 +861,40 @@ void IMUerrorCalc(){
 void instructionRegisterManager(){
   if(!currentInstructionStarted){
     //run the current instruction
-    switch (instructionRegistry[currentInstructionIndex][0]){
-      case 1:
-        currentPosGoalIndex += 1;
-        posGoalReached = false;
-        M1_Pos_setpoint = metersToEncTicks(posTargetPosition[currentPosGoalIndex]);
-        M2_Pos_setpoint = metersToEncTicks(posTargetPosition[currentPosGoalIndex]);
-        break;
+    if(currentInstructionIndex < (sizeof(instructionRegistry) / sizeof(instructionRegistry[0]))){ //avoiding going out of bonds of the array
+      switch (instructionRegistry[currentInstructionIndex][0]){
+        case 1:
+          currentPosGoalIndex += 1;
+          posGoalReached = false;
+          Serial.println("targetPos: ");
+          Serial.println(posTargetPosition[currentPosGoalIndex]);
+          Serial.println("index: ");
+          Serial.println(currentPosGoalIndex);
+          Serial.println(sizeof(instructionRegistry) / sizeof(instructionRegistry[0]));
+          M1_Pos_setpoint = metersToEncTicks(posTargetPosition[currentPosGoalIndex]);
+          M2_Pos_setpoint = metersToEncTicks(posTargetPosition[currentPosGoalIndex]);
+          break;
 
-      case 2:
-        //run servo unfolding function
-        break;
+        case 2:
+          //run servo unfolding function
+          break;
 
-      case 3:
-        //run servo unfolding function
-        break;
-      
-      default:
-        break;
+        case 3:
+          //non-blocking delay
+          break;
+        
+        default:
+          break;
+      }
+
+      //tell armGoalManager to start moving the arm
+      if(instructionRegistry[currentInstructionIndex][1] == 1){
+        currentArmGoalIndex += 1;
+        armGoalReached = false;
+      }
+
+      currentInstructionStarted = true;
     }
-
-    //tell armGoalManager to start moving the arm
-    if(instructionRegistry[currentInstructionIndex][1] == 1){
-      currentArmGoalIndex += 1;
-      armGoalReached = false;
-    }
-
-    currentInstructionStarted = true;
   }
 
   //move the robot and the arm
@@ -883,6 +1018,31 @@ void setup() {
   M1_Pos_PID.SetSampleTime(50);
   M2_Pos_PID.SetSampleTime(50);
 
+  //Stepper setup ###########################
+  // max speed tested 3200, accell 4800
+  engine.init(); //Initialize the engine and set up the GPIOs
+
+  // Attach the stepper to a step_pin
+  stepper = engine.stepperConnectToPin(STEP_PIN);
+
+  if (stepper) {
+    stepper->setDirectionPin(DIR_PIN);  // Set the direction pin
+    stepper->setAutoEnable(true);
+
+    // Set acceleration and speed
+    stepper->setSpeedInHz(3200);   // Steps per second
+    stepper->setAcceleration(4800); // Steps per second squared
+  }
+
+
+
+  //Servo setup
+  //commented out for now to avoid braking the servos
+  // servoLink1.attach(SERVO_LINK1_PIN);
+  // servoLink2.attach(SERVO_LINK2_PIN);
+  // servoLink1.write(servoLink1_Starting_Angle);
+  // servoLink2.write(servoLink2_Starting_Angle);
+
   //Action button setup
   pinMode(ACTION_BUTTON_PIN, INPUT);
 
@@ -915,7 +1075,7 @@ void loop() {
   // calcRollingAvg();
   if(loopNo==0){
     actionButtonWait();
-
+    // ServoTest();
     // //PID target for testing
     // testTargetPOSPID = metersToEncTicks(testTargetPOSPID);
 
@@ -925,10 +1085,10 @@ void loop() {
     // }
   }
   
-  //find the current instructions
+  // //find the current instructions
   instructionRegisterManager();
 
-  //run the PID calculation
+  // //run the PID calculation
   VelPIDCalculation();
 
 
