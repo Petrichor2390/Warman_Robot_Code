@@ -88,7 +88,9 @@ const int TRANSLATE_MAX_SPEED = 450; //RPM for moving motors
 const int TRANSLATE_MIN_SPEED = 100; //otherwise velocity PID fucks up becuase of deadzone
 int min_Takeoff_PWM = 70; //was 63 70 with new wheels
 const double WHEEL_CIRCUMFERANCE_M1 = 0.1394867; //in meters
-const double WHEEL_CIRCUMFERANCE_M2 = 0.137;
+const double WHEEL_CIRCUMFERANCE_M2 = WHEEL_CIRCUMFERANCE_M1;//0.138;
+double targetBrakeVel = 125; //velocity target for braking
+
 // const double WHEEL_CIRCUMFERANCE_M2 = 0.1385442; //in meters
 //max acceleration for motors - post PID
 double max_Acceleration = 100; //max change in PWM value output to the motors
@@ -132,14 +134,15 @@ bool roll_Avg_Filled = false;
 //input = position from encoders, output = setpoint for Velocity PID (range from -300 to 300), setpoint = targets on the track
 double M1_Pos_input, M1_Pos_output, M1_Pos_setpoint;
 double M2_Pos_input, M2_Pos_output, M2_Pos_setpoint;
-double Pos_Kp = 0.16, Pos_Ki = 0, Pos_Kd = 0.02; //p = 0.18
+double Pos_Kp = 0.20, Pos_Ki = 0, Pos_Kd = 0.02; //p = 0.16
 
 PID M1_Pos_PID(&M1_Pos_input, &M1_Pos_output, &M1_Pos_setpoint, Pos_Kp, Pos_Ki, Pos_Kd, DIRECT);
 PID M2_Pos_PID(&M2_Pos_input, &M2_Pos_output, &M2_Pos_setpoint, Pos_Kp, Pos_Ki, Pos_Kd, DIRECT);
 
 double prev_M1_Pos_output = 0;
 double prev_M2_Pos_output = 0;
-double max_Pos_Output_change = 20; //80
+double max_Pos_Output_change = 5; //20
+bool targetBrakeVelExceeded = false; //true if in the current movement the velocity request has reached targetBrakeVel
 
 //process operation variables i.e. goals and order of operation ##############################
 //movement positions
@@ -147,8 +150,8 @@ bool posGoalReached = true; //true if the current goal has been reached - starts
 int currentPosGoalIndex = -1; //-1 for no goal assigned yet, the index of the current goal in the goal list
 bool robotStopped = false;
 double posTargetPosition[] = {
-  1
-  // 1.2,
+  1,
+  0,
   // 0
 };
 
@@ -168,9 +171,9 @@ int armTargetPosition[] = { //example values
 //main instructions
 int currentInstructionIndex = 0;
 bool currentInstructionStarted = false;
-int instructionRegistry[1][2] = {
-  {1,0}
-  // {1,0},
+int instructionRegistry[2][2] = {
+  {1,0},
+  {1,0},
   // {1,0}
 };
 
@@ -310,6 +313,17 @@ double metersToEncTicks(double m, bool wheel = true){
   }
   double ticks = rotations*enc_Ticks_Per_Rot;
   return ticks;
+}
+
+double encTicksToMeters(double ticks, bool wheel = true){
+  double meters = 0;
+  double rotations = ticks/enc_Ticks_Per_Rot;
+  if(wheel){ //true for M1
+    meters = rotations*WHEEL_CIRCUMFERANCE_M1;
+  }else{
+    meters = rotations*WHEEL_CIRCUMFERANCE_M2;
+  }
+  return meters;
 }
 
 int velocityToPWM(double velocity){
@@ -588,41 +602,54 @@ void PosPIDCalculation(bool bypass = false){
       }
     }
 
-    //modify position output based on IMU
-    // double IMU_p = -2.7; //test to validate
-    // double IMU_Kp = (z_Vel*IMU_p)/2;
-    // bool IMU_Adjust_Active = true;
+    //check for slowdown brake prep condition
+    //condition for if vel request drops below target after acceleration
+    if(targetBrakeVelExceeded){
+      //M1
+      if(abs(M1_Pos_output) < targetBrakeVel){
+        if(M1_Pos_output < 0){
+          M1_Pos_output = -targetBrakeVel;
+        }else{
+          M1_Pos_output = targetBrakeVel;
+        }
+      }
+      //M2
+      if(abs(M2_Pos_output) < targetBrakeVel){
+        if(M2_Pos_output < 0){
+          M2_Pos_output = -targetBrakeVel;
+        }else{
+          M2_Pos_output = targetBrakeVel;
+        }
+      }
+    }
 
-    //modify position based on enc
-    // double ENC_p = 0.15; //test
-    // double encDiff = M1_encoderPos - M2_encoderPos; //for forward movement -right turn = positive, -left turn = negative
-    // double ENC_Kp = encDiff*ENC_p;
-    // encDiffPrint = encDiff*10;
+    double pos_ToleranceM1 = metersToEncTicks(0.06, true); //60mm
+    double pos_ToleranceM2 = metersToEncTicks(0.06, false);
 
-    // if(ENC_Kp > 0){
-    //   M1_Pos_output -= ENC_Kp;
-    // }else{
-    //   M2_Pos_output += ENC_Kp;
-    // }
-
-
-    // //find if we within a tolerance of the setpoint
-    // if((abs(M1_Pos_setpoint-M1_Pos_input) < metersToEncTicks(0.1))){
-    //   IMU_Adjust_Active = false;
-    // }
-
-    //if positive turning to the right
-    // if(IMU_Adjust_Active){
-    //   M1_Pos_output -= IMU_Kp;
-    //   M2_Pos_output += IMU_Kp;
-    // }
-
+    //when close enforce targetBrakeVel
+    if(abs(M1_encoderPos - M1_Pos_setpoint) < pos_ToleranceM1 && abs(M2_encoderPos - M2_Pos_setpoint) < pos_ToleranceM2){
+      //if we are within range of the goal modify the posPid output
+      if(M1_Pos_output < 0){ //negative case
+        M1_Pos_output = targetBrakeVel;  
+        M2_Pos_output = targetBrakeVel;
+      }else{ //positive case
+        M1_Pos_output = -targetBrakeVel;  
+        M2_Pos_output = -targetBrakeVel;
+      }
+    }
+  
     //set Vel PID setpoint to Pos PID output
     M1_Vel_setpoint = M1_Pos_output;
     M2_Vel_setpoint = M2_Pos_output;
 
     prev_M1_Pos_output = M1_Pos_output;
     prev_M2_Pos_output = M2_Pos_output;
+
+    if(abs(M1_Pos_output) > targetBrakeVel || abs(M2_Pos_output) > targetBrakeVel){
+      //if in neg or pos direction the PWM request goes above targetBrakeVel remember so that it never goes below targetBrakeVel before stopping
+      targetBrakeVelExceeded = true;
+    }
+
   }else{
     //used for testing velocity PID
     M1_Vel_setpoint = testTargetVelPID;
@@ -662,19 +689,21 @@ void VelPIDCalculation(){
     M1_Vel_PID.Compute();
     M2_Vel_PID.Compute();
 
-    double ENC_p = 5; //test
-    double encDiff = M1_encoderPos - M2_encoderPos; //for forward movement -right turn = positive, -left turn = negative
+    double ENC_p = 10000; //test
+    double encDiff = encTicksToMeters(M1_encoderPos, true) - encTicksToMeters(M2_encoderPos, false); //for forward movement -right turn = positive, -left turn = negative
     double ENC_Kp = encDiff*ENC_p;
-    encDiffPrint = encDiff*10;
+    encDiffPrint = encDiff*10000;
 
     double M1_mod = 0;
     double M2_mod = 0;
 
-    if(ENC_Kp > 0){
-      M1_mod = - ENC_Kp;
-    }else{
-      M2_mod = ENC_Kp;
-    }
+    // if(ENC_Kp > 0){
+    //   M1_mod = - ENC_Kp;
+    //   M2_mod = ENC_Kp;
+    // }else{
+    //   M2_mod = ENC_Kp;
+    //   M1_mod = -ENC_Kp;
+    // }
 
     //convert velocity request to corresponding PWM reponse
     int M1_PWM_Out = M1_Vel_output + velocityToPWM(M1_Vel_setpoint + M1_mod);
@@ -714,15 +743,7 @@ void VelPIDCalculation(){
 
     //send PWM to drivetrain
     if(!robotStopped){
-      if(M1_cutt == true && M2_cutt == true){
-        actuateDriveTrain(0, 0);
-      }else if(M1_cutt == true && M2_cutt == false){
-        actuateDriveTrain(0, M2_PWM_Out);
-      }else if(M1_cutt == false && M2_cutt == true){
-        actuateDriveTrain(M1_PWM_Out, 0);
-      }else{
-        actuateDriveTrain(M1_PWM_Out, M2_PWM_Out);
-      }
+      actuateDriveTrain(M1_PWM_Out, M2_PWM_Out);
     }else{
       actuateDriveTrain(0,0,true);
     }
@@ -741,18 +762,20 @@ bool posGoalManager(){
   VelPIDCalculation();
 
   //check if the robot is within tolerance of the goal
-  double pos_ToleranceM1 = metersToEncTicks(0.005, true); //5mm tolerance
-  double pos_ToleranceM2 = metersToEncTicks(0.005, false); //5mm tolerance
+  double pos_ToleranceM1 = metersToEncTicks(0.005, true); //2mm tolerance
+  double pos_ToleranceM2 = metersToEncTicks(0.005, false); //2mm tolerance
 
   bool ret = false;
   //if both motors are within tolerance then brake and consider the goal reached
-  if(abs(M1_encoderPos - M1_Pos_setpoint) < pos_ToleranceM1 && abs(M2_encoderPos - M2_Pos_setpoint) < pos_ToleranceM2){
+  if(abs(M1_encoderPos - M1_Pos_setpoint) < pos_ToleranceM1 || abs(M2_encoderPos - M2_Pos_setpoint) < pos_ToleranceM2){ //was an and but now or - this assumes that the robot is straight when it approaches the goal
     actuateDriveTrain(0,0,true);
+    delay(1000);
     robotStopped = true;
     ret = true;
   }else{
     robotStopped = false;
   }
+  Serial.println(robotStopped);
   return ret;
 }
 
@@ -839,7 +862,7 @@ void brakeTest(){
 }
 
 void velocityTest(){
-  int PWMTestVal = 5;
+  int PWMTestVal = 60;
   int PWMinc = 5;
   int PWMminInc = 1;
 
@@ -933,6 +956,7 @@ void instructionRegisterManager(){
           Serial.println(sizeof(instructionRegistry) / sizeof(instructionRegistry[0]));
           M1_Pos_setpoint = metersToEncTicks(posTargetPosition[currentPosGoalIndex], true);
           M2_Pos_setpoint = metersToEncTicks(posTargetPosition[currentPosGoalIndex], false);
+          targetBrakeVelExceeded = false; //resetting this variable whenever moving to a new goal REMEMBER
           break;
 
         case 2:
@@ -1134,7 +1158,7 @@ void setup() {
 void loop() {
   // calcRollingAvg();
   if(loopNo==0){
-    actionButtonWait();
+    actionButtonWait(false);
     // ServoTest();
     // //PID target for testing
     // testTargetPOSPID = metersToEncTicks(testTargetPOSPID);
@@ -1147,6 +1171,7 @@ void loop() {
   
   //find the current instructions
   instructionRegisterManager();
+  // velocityTest();
 
   // takeOffTest();
   // brakeTest();
