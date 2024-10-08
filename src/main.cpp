@@ -71,6 +71,8 @@ Adafruit_LSM6DSOX sox;
 double z_Vel = 0; //negative when M2 too fast, positive when M2 too slow vise versa for reverse
 sensors_event_t accel, gyro, temp;
 double z_Error = 0;
+long int lastIMUTime = micros();
+double z_POS_IMU = 0;
 
 //ACTION buton
 #define ACTION_BUTTON_PIN 40
@@ -87,9 +89,9 @@ double enc_Ticks_Per_Rot = GEAR_RATIO*TICKS_PER_MOTOR_TURN;
 const int TRANSLATE_MAX_SPEED = 450; //RPM for moving motors
 const int TRANSLATE_MIN_SPEED = 100; //otherwise velocity PID fucks up becuase of deadzone
 int min_Takeoff_PWM = 70; //was 63 70 with new wheels
-const double WHEEL_CIRCUMFERANCE_M1 = 0.1394867; //in meters
+const double WHEEL_CIRCUMFERANCE_M1 = 0.141629; //in meters
 const double WHEEL_CIRCUMFERANCE_M2 = WHEEL_CIRCUMFERANCE_M1;//0.138;
-double targetBrakeVel = 125; //velocity target for braking
+double targetBrakeVel = 200; //velocity target for braking
 
 //rolling average velocity
 const int roll_N = 3;
@@ -105,19 +107,20 @@ bool roll_Avg_Filled = false;
 //Position PID################################################################# 
 //input = position from encoders, output = setpoint for Velocity PID (range from -300 to 300), setpoint = targets on the track
 double Pos_input, Pos_output, Pos_setpoint;
-double Pos_Kp = 0.14, Pos_Ki = 0, Pos_Kd = 0.02; //p = 0.16
+double Pos_Kp = 0.28, Pos_Ki = 0, Pos_Kd = 0.0; //p = 0.16 //d= 0.02
 
 PID pos_PID(&Pos_input, &Pos_output, &Pos_setpoint, Pos_Kp, Pos_Ki, Pos_Kd, DIRECT);
 
 double prev_Pos_output = 0;
-double max_Pos_Output_change = 10;
+double max_Pos_Output_change = 50; //was 10
 bool targetBrakeVelExceeded = false; //true if in the current movement the velocity request has reached targetBrakeVel
 double M1_Vel_Save = 0;
 double M2_Vel_Save = 0;
+bool dirReverseFlag = false; //true if the robot has just changes direction
 
 //EncDiff PID ##################################################################
 double Enc_input, Enc_output, Enc_setpoint = 0;
-double Enc_Kp = 20000, Enc_Ki = 0, Enc_Kd = 250; //p = 30000 //i= 500
+double Enc_Kp = 20000, Enc_Ki = 0, Enc_Kd = 0; //p = 30000 //i= 500
 
 PID enc_PID(&Enc_input, &Enc_output, &Enc_setpoint, Enc_Kp, Enc_Ki, Enc_Kd, DIRECT);
 
@@ -135,10 +138,17 @@ int prev_M2_enc_Pos = 0;
 bool posGoalReached = true; //true if the current goal has been reached - starts as true to avoid startup issues
 int currentPosGoalIndex = -1; //-1 for no goal assigned yet, the index of the current goal in the goal list
 bool robotStopped = false;
+// double posTargetPosition[] = {
+//   0.1,
+//   // 0,
+// };
+
 double posTargetPosition[] = {
-  1,
-  // 0,
-  // 0
+  -0.35,
+  -0.45,
+  0.4,
+  0.5,
+  0.20725,
 };
 
 //arm positions
@@ -157,11 +167,30 @@ int armTargetPosition[] = { //example values
 //main instructions
 int currentInstructionIndex = 0;
 bool currentInstructionStarted = false;
-int instructionRegistry[1][2] = {
+int instructionRegistry[5][2] = {
+  {1,0},
+  {1,0},
+  {1,0},
+  {1,0},
   {1,0},
   // {1,0},
+
   // {1,0}
 };
+
+//full run example
+// int instructionRegistry[10][2] = {
+//   {0,1}, //short pillar
+//   {0,1}, //tall pillar
+//   {1,0}, // move to ball 3
+//   {0,1}, // RHS ball
+//   {1,0}, // move to ball 4
+//   {0,1}, //LHS ball
+//   {1,0}, //move to ball 5
+//   {0,1}, //LHS ball
+//   {1,0}, //move to ball 6
+//   {0,1}, //RHS ball
+// };
 
 //instruction registry legend
 //first number
@@ -244,20 +273,54 @@ void IRAM_ATTR M2handleEncoderB() {
 }
 
 int getM2EncPos(){
-  return int(M2_encoderPos/0.991); //0.985 perfect for backwards //0.991 empirically accurate
+  return int(M2_encoderPos*0.99); //0.985 perfect for backwards //0.9917 empirically accurate
 }
 
 void actuateDriveTrain(int M1PWM, int M2PWM, bool brake = false){ //negative PWM values are backwards
   if(brake){ //braking
+    // //M1
+    // digitalWrite(M1_IN1, LOW);
+    // digitalWrite(M1_IN2, LOW);
+    // analogWrite(M1_EN, 0);
+
+    // //M2
+    // digitalWrite(M2_IN1, LOW);
+    // digitalWrite(M2_IN2, LOW);
+    // analogWrite(M2_EN, 0);
+
+    int PWMbrakeM1 = 5;
+    int PWMbrakeM2 = 15;
+
+    int PWMOutM1 = 0;
+    int PWMOutM2 = 0;
+    if(M1_Rolling_Avg_Vel > 0){
+      PWMOutM1 = -PWMbrakeM1;
+      PWMOutM2 = -PWMbrakeM1;
+    }else{
+      PWMOutM1 = PWMbrakeM1;
+      PWMOutM2 = PWMbrakeM2;
+    }
+
     //M1
-    digitalWrite(M1_IN1, LOW);
-    digitalWrite(M1_IN2, LOW);
-    analogWrite(M1_EN, 0);
+    if (PWMOutM1 > 0) {
+      digitalWrite(M1_IN1, HIGH);
+      digitalWrite(M1_IN2, LOW);
+    } else if (PWMOutM1 < 0) {
+      digitalWrite(M1_IN1, LOW);
+      digitalWrite(M1_IN2, HIGH);
+    }
+    analogWrite(M1_EN, int(abs(PWMOutM1)));
 
     //M2
-    digitalWrite(M2_IN1, LOW);
-    digitalWrite(M2_IN2, LOW);
-    analogWrite(M2_EN, 0);
+    if (PWMOutM2 > 0) {
+      digitalWrite(M2_IN1, HIGH);
+      digitalWrite(M2_IN2, LOW);
+    } else if (PWMOutM2 < 0) {
+      digitalWrite(M2_IN1, LOW);
+      digitalWrite(M2_IN2, HIGH);
+    }
+    analogWrite(M2_EN, int(abs(PWMOutM2)));
+
   }else{ //driving
     //normalise PWM if it comes in as invalid
     if(M1PWM > 255){
@@ -333,7 +396,7 @@ int velocityToPWM(double velocity){
   }
   
   double PWMReturn;
-  double relationCutoff = 65;//was 60 //the point at which the PWM relationship doesn't hold //was 32 but the robot would sometimes stop at this PWM
+  double relationCutoff = 35;//was 60 //the point at which the PWM relationship doesn't hold //was 32 but the robot would sometimes stop at this PWM
 
   //quadratic formula co-efficients
   float a = -0.0108;
@@ -463,9 +526,9 @@ void StepperTest(){
   // stepper.moveTo(0);
   // delay(2000);
 
-  stepper->moveTo(1450);
+  stepper->moveTo(1480);
   delay(5000);
-  stepper->moveTo(-1450);
+  stepper->moveTo(-1455);
   delay(5000);
   stepper->moveTo(0);
   delay(5000);
@@ -562,66 +625,83 @@ void PosPIDCalculation(){
   //compute PID output
   pos_PID.Compute();
 
+  Serial.println("raw POSPID");
+  Serial.println(Pos_output);
+
   //logic for modifing position increases to limit acceleration
   if(Pos_setpoint > Pos_input){
     //forward case
     if(abs(Pos_output-prev_Pos_output) > max_Pos_Output_change){
       if(Pos_output > prev_Pos_output){
-        Pos_output = prev_Pos_output + max_Pos_Output_change;
+        Serial.println("Limiting Forward accelleration");
+        if(prev_Pos_output*Pos_output > 0){
+          Pos_output = prev_Pos_output + max_Pos_Output_change;
+        }else{ //if we have just changed directions
+          Pos_output = 0 + max_Pos_Output_change;
+          Serial.println("using new code");
+        }
       }
     }
   }else{
     //backwards case
     if(abs(Pos_output-prev_Pos_output) > max_Pos_Output_change){
       if(Pos_output < prev_Pos_output){
-        Pos_output = prev_Pos_output - max_Pos_Output_change;
+        Serial.println("Limiting reverse accelleration");
+        if(prev_Pos_output*Pos_output > 0){
+          Pos_output = prev_Pos_output - max_Pos_Output_change;
+        }else{ //if we have just changed directions
+          Serial.println("using new code");
+          Pos_output = 0 - max_Pos_Output_change;
+        }
       }
     }
   }
 
-  //check for slowdown brake prep condition
-  //condition for if vel request drops below target after acceleration
-
-  if(targetBrakeVelExceeded){
-    if(abs(Pos_output) < targetBrakeVel){
-      if(Pos_output < 0){
-        Pos_output = -targetBrakeVel;
-      }else{
-        Pos_output = targetBrakeVel;
-      }
+  //if the velocity value is lower than braketargetvel then set to braketargetval
+  if(abs(Pos_output) < targetBrakeVel){
+    if(Pos_output > 0){
+      Serial.println("manually changing POSPID to");
+      Serial.println(targetBrakeVel);
+      Pos_output = targetBrakeVel;
+    }else{
+      Serial.println("manually changing POSPID to");
+      Serial.println(-targetBrakeVel);
+      Pos_output = -targetBrakeVel;
     }
   }
 
+  //this code needs checking
   double pos_Tolerance = metersToEncTicks(0.06, true); //60mm
 
-  //when close enforce targetBrakeVel
+  //when close enforce targetBrakeVel if going too fast
   if(abs(avgEnc - Pos_setpoint) < pos_Tolerance){
     //if we are within range of the goal modify the posPid output
     if(Pos_output < 0){ //negative case
-      Pos_output = -targetBrakeVel;  
+      Serial.println("manually changing POSPID to");
+      Serial.println(-targetBrakeVel);
+      Pos_output = -targetBrakeVel;
     }else{ //positive case
-      Pos_output = targetBrakeVel;  
+      Serial.println("manually changing POSPID to");
+      Serial.println(targetBrakeVel);
+      Pos_output = targetBrakeVel;
     }
   }
 
   //make sure that the output is positive if moving forward and negative if moving backwards
   if(Pos_setpoint > Pos_input){ //forward direction
-      if(Pos_output < 0){
-        Pos_output = prev_Pos_output;
-      }
-    }else{ //backwards
-      if(Pos_output > 0){
-        Pos_output = prev_Pos_output;
-      }
+    if(Pos_output < 0){
+      Serial.print("Ignoring new POSPID: requested opposite velocity");
+      Pos_output = prev_Pos_output;
     }
+  }else{ //backwards
+    if(Pos_output > 0){
+      Serial.print("Ignoring new POSPID: requested opposite velocity");
+      Pos_output = prev_Pos_output;
+    }
+  }
 
   //save previous output
   prev_Pos_output = Pos_output;
-
-  if(abs(Pos_output) > targetBrakeVel){
-    //if in neg or pos direction the PWM request goes above targetBrakeVel remember so that it never goes below targetBrakeVel before stopping
-    targetBrakeVelExceeded = true;
-  }
 }
 
 void VelPIDCalculation(){
@@ -631,7 +711,7 @@ void VelPIDCalculation(){
   double time_Passed = (current_Time - prev_Enc_PID_Time)/1000; //convert from micros to millis
 
   //avoid to small increments and increase repeatability
-  if (time_Passed < 10) {
+  if (time_Passed < 1) {
     return; 
   }else{
     PosPIDCalculation(); //bypass = true - skipping for vel pid calc
@@ -643,20 +723,20 @@ void VelPIDCalculation(){
     //calculate pid output values
     enc_PID.Compute();
 
-    double M1_Modified_Pos_output = Pos_output + Enc_output;
-    double M2_Modified_Pos_output = Pos_output - Enc_output;
+    double M1_Modified_Pos_output = Pos_output; //+ Enc_output;
+    double M2_Modified_Pos_output = Pos_output; //- Enc_output;
 
     //convert velocity request to corresponding PWM reponse
     int M1_PWM_Out = velocityToPWM(M1_Modified_Pos_output);
     int M2_PWM_Out = velocityToPWM(M2_Modified_Pos_output);
 
     //calculat the effect of the ENC_PID on PWM
-    int PWM_test = velocityToPWM(Pos_output);
-    int M1_Diff = M1_PWM_Out - PWM_test;
-    int M2_Diff = M2_PWM_Out - PWM_test;
-    Serial.println("M1 and M2 Diff due to encPID: ");
-    Serial.println(M1_Diff);
-    Serial.println(M2_Diff);
+    // int PWM_test = velocityToPWM(Pos_output);
+    // int M1_Diff = M1_PWM_Out - PWM_test;
+    // int M2_Diff = M2_PWM_Out - PWM_test;
+    // Serial.println("M1 and M2 Diff due to encPID: ");
+    // Serial.println(M1_Diff);
+    // Serial.println(M2_Diff);
 
     // check for PWM going the wrong direction - if it is set to previuous PWM value
     if(Pos_setpoint > Pos_input){ //forward direction - positive PWM
@@ -675,11 +755,17 @@ void VelPIDCalculation(){
       }
     }
 
+    //modify PWM form ENC_PID right at the end so the system has max authority
+    M1_PWM_Out += Enc_output;
+    M2_PWM_Out -= Enc_output;
+
     //send PWM to drivetrain
     if(!robotStopped){
       actuateDriveTrain(M1_PWM_Out, M2_PWM_Out);
     }else{
       actuateDriveTrain(0,0,true);
+      // actuateDriveTrain(0,0);
+
     }
 
     //save PWM values for logging and printing
@@ -696,13 +782,16 @@ bool posGoalManager(){
   VelPIDCalculation();
 
   //check if the robot is within tolerance of the goal
-  double pos_Tolerance = metersToEncTicks(0.005, true); //2mm tolerance //accounting for different sized wheels
+  double pos_Tolerance = metersToEncTicks(0.015, true); //0.015 prev
 
   bool ret = false;
   //if both motors are within tolerance then brake and consider the goal reached
   double avgEnc = (M1_encoderPos+getM2EncPos())/2;
   if(abs(avgEnc - Pos_setpoint) < pos_Tolerance){ //was an and but now or - this assumes that the robot is straight when it approaches the goal
     actuateDriveTrain(0,0,true);
+    // actuateDriveTrain(0,0);
+
+    Serial.println("STOPPED AT TARGET DELAYING 1000");
     delay(1000);
     robotStopped = true;
     ret = true;
@@ -851,10 +940,17 @@ void velocityTest(){
   }
 }
 
-void IMUUpdate(){
+void IMUUpdate(bool calcZPos = true){
   sox.getEvent(&accel, &gyro, &temp);
   z_Vel = gyro.gyro.z * 180.0 / PI - z_Error;
-  // Serial.println(z_Vel);
+
+  //new code for finding the z position of the robot - untested
+  if(calcZPos){
+    long int currentTime = micros();
+    int IMUtimeDelta = currentTime-lastIMUTime;
+    lastIMUTime = currentTime;
+    z_POS_IMU += z_Vel*IMUtimeDelta*0.000001; //convert to seconds
+  }
 }
 
 void IMUerrorCalc(){
@@ -865,13 +961,16 @@ void IMUerrorCalc(){
 
   //grab test data
   for(int i = 0; i < tests; i++){
-    IMUUpdate();
+    IMUUpdate(false); //don't calculate Z pos
     sum += z_Vel;
     delay(10);
   }
 
   //calculating error
   z_Error = sum/tests;
+
+  //set the last IMU time to current time to avoid error
+  lastIMUTime = micros();
 }
 
 void instructionRegisterManager(){
@@ -886,9 +985,8 @@ void instructionRegisterManager(){
           Serial.println(posTargetPosition[currentPosGoalIndex]);
           Serial.println("index: ");
           Serial.println(currentPosGoalIndex);
-          Serial.println(sizeof(instructionRegistry) / sizeof(instructionRegistry[0]));
           Pos_setpoint = metersToEncTicks(posTargetPosition[currentPosGoalIndex], true); //2 wheels different diameters not accounted for here
-          targetBrakeVelExceeded = false; //resetting this variable whenever moving to a new goal REMEMBER
+          pos_PID.Compute();
           break;
 
         case 2:
@@ -930,7 +1028,7 @@ void core0Loop(void * pvParameters) {
   while (true) {
       // Serial.println("core 0 printing");
       // delay(100);  // Add some delay to prevent watchdog timeout
-      IMUUpdate();
+      //IMUUpdate();
 
       //velocity calculation
       long int current_Time = micros();
@@ -947,12 +1045,6 @@ void core0Loop(void * pvParameters) {
         prev_M1_enc_Pos = M1_encoderPos;
         prev_M2_enc_Pos = getM2EncPos();
 
-        // Serial.print("time_Passed: ");
-        // Serial.println(time_Passed);
-
-        // Serial.print("M1_deltaEncPos: ");
-        // Serial.println(M1_deltaEncPos);
-
         //calculate velocity and save to global variable
         M1_Vel_Save = ((double)M1_deltaEncPos / time_Passed) * 1000 * 60 / enc_Ticks_Per_Rot;
         M2_Vel_Save = ((double)M2_deltaEncPos / time_Passed) * 1000 * 60 / enc_Ticks_Per_Rot;
@@ -960,8 +1052,6 @@ void core0Loop(void * pvParameters) {
         //vel save has changed now calculate the rolling average again with the change
         calcRollingAvg();
 
-        // Serial.print("M1_Vel: ");
-        // Serial.println(M1_Vel_Save);
       }
 
       //stability/not really sure if this is needed
@@ -1022,12 +1112,12 @@ void setup() {
   //PID SETUP
   pos_PID.SetMode(AUTOMATIC);
   pos_PID.SetOutputLimits(-TRANSLATE_MAX_SPEED, TRANSLATE_MAX_SPEED);
-  pos_PID.SetSampleTime(20);
+  pos_PID.SetSampleTime(1);
 
   //Enc Pid
   enc_PID.SetMode(AUTOMATIC);
   enc_PID.SetOutputLimits(-475, 475);
-  enc_PID.SetSampleTime(20);
+  enc_PID.SetSampleTime(1);
 
   //Stepper setup ###########################
   // max speed tested 3200, accell 4800
@@ -1080,11 +1170,11 @@ void setup() {
 void loop() {
   // calcRollingAvg();
   if(loopNo==0){
-    actionButtonWait(false);
+    actionButtonWait();
   }
 
-  instructionRegisterManager();
+  StepperTest();
+  // instructionRegisterManager();
 
-  delay(1);
   loopNo++;
 }
