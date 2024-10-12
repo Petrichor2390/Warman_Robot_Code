@@ -277,6 +277,11 @@ int getM2EncPos(){
   return int(M2_encoderPos*0.99); //0.985 perfect for backwards //0.9917 empirically accurate
 }
 
+float getPWMOffsetModifier(int PWM){
+  // will be filled out with data based on offset testing
+  return offset;
+}
+
 void actuateDriveTrain(int M1PWM, int M2PWM, bool brake = false){ //negative PWM values are backwards
   //modifier to account for difference in motors
   float offSetMod = getPWMOffsetModifier(M1PWM); //based on M1PWM - could be future problem
@@ -354,11 +359,6 @@ void actuateDriveTrain(int M1PWM, int M2PWM, bool brake = false){ //negative PWM
     // Serial.println("M2 PWM delivered: ");
     // Serial.println(M2PWM);
   }
-}
-
-float getPWMOffsetModifier(int PWM){
-  // will be filled out with data based on offset testing
-  return offset;
 }
 
 double metersToEncTicks(double m, bool wheel = true){
@@ -944,8 +944,8 @@ void velocityTest(){
 }
 
 void OffsetTest(){
-  int PWMTestVal = 70;
-  int PWMInc = 20;
+  int PWMTestVal = -70;
+  int PWMInc = -20;
   //testingPeriod
   int testMillis = 1500;
 
@@ -953,6 +953,14 @@ void OffsetTest(){
 
   bool testingValues = true;
   while(testingValues){
+    if(abs(PWMTestVal) < 89){
+      testMillis = 3000;
+    }else if(abs(PWMTestVal) > 125){
+      testMillis = 2000;
+    }else if(abs(PWMTestVal) > 165){
+      testMillis = 1500;
+    }
+
     bool offsetFound = false;
     bool accepted = false;
     offset = 1.0;
@@ -1003,11 +1011,12 @@ void OffsetTest(){
         }
       }
     }
-  }
-
-  PWMTestVal += PWMInc;
-  if(PWMTestVal > 255){
-    testingValues = false;
+    PWMTestVal += PWMInc;
+    Serial.println("Testing PWM: ");
+    Serial.println(PWMTestVal);
+    if(PWMTestVal > 255){
+      testingValues = false;
+    }
   }
 
 
@@ -1256,7 +1265,8 @@ void loop() {
 
   // StepperTest();
   // instructionRegisterManager();
-  velocityTest();
+  // velocityTest();
+  OffsetTest();
 
 
   loopNo++;
