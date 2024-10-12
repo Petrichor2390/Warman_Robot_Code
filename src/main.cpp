@@ -108,12 +108,12 @@ bool roll_Avg_Filled = false;
 //Position PID################################################################# 
 //input = position from encoders, output = setpoint for Velocity PID (range from -300 to 300), setpoint = targets on the track
 double Pos_input, Pos_output, Pos_setpoint;
-double Pos_Kp = 0.22, Pos_Ki = 0, Pos_Kd = 0.0; //p = 0.16 //d= 0.02
+double Pos_Kp = 0.11, Pos_Ki = 0, Pos_Kd = 0.0; //p = 0.22 //d= 0.02
 
 PID pos_PID(&Pos_input, &Pos_output, &Pos_setpoint, Pos_Kp, Pos_Ki, Pos_Kd, DIRECT);
 
 double prev_Pos_output = 0;
-double max_Pos_Output_change = 10; //was 10
+double max_Pos_Output_change = 20; //was 10
 bool targetBrakeVelExceeded = false; //true if in the current movement the velocity request has reached targetBrakeVel
 double M1_Vel_Save = 0;
 double M2_Vel_Save = 0;
@@ -140,7 +140,7 @@ bool posGoalReached = true; //true if the current goal has been reached - starts
 int currentPosGoalIndex = -1; //-1 for no goal assigned yet, the index of the current goal in the goal list
 bool robotStopped = false;
 double posTargetPosition[] = {
-  0.6,
+  0.85,
 };
 
 // double posTargetPosition[] = {
@@ -353,8 +353,8 @@ void actuateDriveTrain(int M1PWM, int M2PWM, bool brake = false){ //negative PWM
   M2PWM = M2PWM*offSetMod;
 
   if(brake){ //braking
-    int PWMbrakeM1 = 5;
-    int PWMbrakeM2 = 15;
+    int PWMbrakeM1 = 0;
+    int PWMbrakeM2 = 0;
 
     int PWMOutM1 = 0;
     int PWMOutM2 = 0;
@@ -385,6 +385,15 @@ void actuateDriveTrain(int M1PWM, int M2PWM, bool brake = false){ //negative PWM
       digitalWrite(M2_IN2, HIGH);
     }
     analogWrite(M2_EN, int(abs(PWMOutM2)));
+
+    // digitalWrite(M1_IN1, LOW);
+    // digitalWrite(M1_IN2, LOW);
+    // analogWrite(M1_EN, 0);
+
+    // //M2
+    // digitalWrite(M2_IN1, LOW);
+    // digitalWrite(M2_IN2, LOW);
+    // analogWrite(M2_EN, 0);
 
   }else{ //driving
     //normalise PWM if it comes in as invalid
@@ -458,8 +467,12 @@ int velocityToPWM(double velocity){
   }
 
   //the logic doesn't hold if you keep pushing numbers higher
-  if(abs(velocity) > 450){
-    velocity = 450;
+  if(abs(velocity) > 420){
+    if(velocity > 0){
+      velocity = 420;
+    }else{
+      velocity = -420;
+    }
   }
   
   double PWMReturn;
@@ -486,7 +499,7 @@ int velocityToPWM(double velocity){
   if (discriminant < 0) {
     Serial.println("No real solutions to PWM conversion returning 0 PWM");
     return 0;
-  } else {
+  }else{
     // Two possible solutions for x
     float x1 = (-b + sqrt(discriminant)) / (2*a);
     float x2 = (-b - sqrt(discriminant)) / (2*a);
@@ -500,10 +513,10 @@ int velocityToPWM(double velocity){
 
   //if the PWM value is less than the cutoff point set it to the cutoff point
   if(abs(PWMReturn) < relationCutoff){
-    if((PWMReturn) > 0){
-      PWMReturn = relationCutoff; //commenting out for now
+    if(PWMReturn > 0){
+      PWMReturn = relationCutoff;
     }else{
-      PWMReturn = -relationCutoff; //commenting out for now
+      PWMReturn = -relationCutoff;
     }
   }
 
@@ -856,14 +869,11 @@ void VelPIDCalculation(){
 }
 
 bool posGoalManager(){
-
   //run the PID
   VelPIDCalculation();
 
   //check if the robot is within tolerance of the goal
   double pos_Tolerance = metersToEncTicks(0.02, true); //0.015 prev
-
-
 
   bool ret = false;
   //if both motors are within tolerance then brake and consider the goal reached
@@ -874,8 +884,8 @@ bool posGoalManager(){
     actuateDriveTrain(0,0,true);
     // actuateDriveTrain(0,0);
 
-    Serial.println("STOPPED AT TARGET DELAYING 1000");
-    delay(1000);
+    // Serial.println("STOPPED AT TARGET DELAYING 1000");
+    // delay(1000);
     robotStopped = true;
     ret = true;
   }else{
@@ -1339,12 +1349,12 @@ void setup() {
 void loop() {
   // calcRollingAvg();
   if(loopNo==0){
-    actionButtonWait(false);
+    actionButtonWait(true);
   }
 
   // StepperTest();
-  // instructionRegisterManager();
-  velocityTest();
+  instructionRegisterManager();
+  // velocityTest();
   // OffsetTest();
 
 
