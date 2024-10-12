@@ -113,7 +113,7 @@ double Pos_Kp = 0.22, Pos_Ki = 0, Pos_Kd = 0.0; //p = 0.16 //d= 0.02
 PID pos_PID(&Pos_input, &Pos_output, &Pos_setpoint, Pos_Kp, Pos_Ki, Pos_Kd, DIRECT);
 
 double prev_Pos_output = 0;
-double max_Pos_Output_change = 50; //was 10
+double max_Pos_Output_change = 10; //was 10
 bool targetBrakeVelExceeded = false; //true if in the current movement the velocity request has reached targetBrakeVel
 double M1_Vel_Save = 0;
 double M2_Vel_Save = 0;
@@ -140,7 +140,7 @@ bool posGoalReached = true; //true if the current goal has been reached - starts
 int currentPosGoalIndex = -1; //-1 for no goal assigned yet, the index of the current goal in the goal list
 bool robotStopped = false;
 double posTargetPosition[] = {
-  -0.6,
+  0.6,
 };
 
 // double posTargetPosition[] = {
@@ -237,7 +237,6 @@ std::vector<std::pair<int, float>> offsetResponsePOS = {
   {210, 1.05},
   {230, 1.05},
 };
-
 
 //M1 interupts
 void IRAM_ATTR M1handleEncoderA() {
@@ -349,6 +348,8 @@ float getPWMOffsetModifier(int PWM){
 void actuateDriveTrain(int M1PWM, int M2PWM, bool brake = false){ //negative PWM values are backwards
   //modifier to account for difference in motors
   float offSetMod = getPWMOffsetModifier(M1PWM); //based on M1PWM - could be future problem
+  // Serial.println("offSetMod: ");
+  // Serial.println(offSetMod);
   M2PWM = M2PWM*offSetMod;
 
   if(brake){ //braking
@@ -455,21 +456,30 @@ int velocityToPWM(double velocity){
     posVelocityRequest = true;
   }else{
     posVelocityRequest = false;
-    velocity = abs(velocity);
   }
 
   //the logic doesn't hold if you keep pushing numbers higher
-  if(velocity > 475){
-    velocity = 475;
+  if(abs(velocity) > 450){
+    velocity = 450;
   }
   
   double PWMReturn;
-  double relationCutoff = 35;//was 60 //the point at which the PWM relationship doesn't hold //was 32 but the robot would sometimes stop at this PWM
+  double relationCutoff = 52;
 
   //quadratic formula co-efficients
-  float a = -0.0108;
-  float b = 4.9083;
-  float c = -74.459 - velocity;
+  float a;
+  float b;
+  float c;
+
+  if(posVelocityRequest){
+    a = ;
+    b = ;
+    c = - velocity;
+  }else{
+    a = ;
+    b = ;
+    c = + velocity;
+  }
 
   // Calculate discriminant
   float discriminant = b * b - 4 * a * c;
@@ -959,17 +969,24 @@ void brakeTest(){
 }
 
 void velocityTest(){
-  int PWMTestVal = 45;
-  int PWMinc = 5;
-  int PWMminInc = 1;
+  int PWMTestVal = -50;
+  int PWMinc = -5;
+  int PWMminInc = -1;
 
-  int accelMillis = 1500; //how long the robot is given to speed up to vel
+  int accelMillis = 750; //how long the robot is given to speed up to vel
   int velSampleMillis = 1500; //sampling period once at speed
 
   Serial.println("PWM value,velocityM1,velocityM2");
 
   //main while loop for testing PWM values
   while(true){ //turn off robot to stop test
+    if(abs(PWMTestVal) > 150){
+      accelMillis = 500;
+      velSampleMillis = 1000;
+    }else{
+      int accelMillis = 750;
+      int velSampleMillis = 1500;
+    }
 
     //running velocity test
     actuateDriveTrain(PWMTestVal, PWMTestVal);
@@ -1329,8 +1346,8 @@ void loop() {
 
   // StepperTest();
   // instructionRegisterManager();
-  // velocityTest();
-  OffsetTest();
+  velocityTest();
+  // OffsetTest();
 
 
   loopNo++;
