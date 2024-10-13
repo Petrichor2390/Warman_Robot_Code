@@ -3,6 +3,7 @@
 #include <PID_v1.h>
 #include <FastAccelStepper.h>
 #include <ESP32Servo.h>
+#include <vector>
 
 //ENCODERs###################################################################
 //M1
@@ -212,6 +213,7 @@ long int buttonPressTime = 0;
 bool printMotorVelError = false;
 double velError = 0;
 double encDiffPrint = 0;
+float offset = 1;
 
 //M1 interupts
 void IRAM_ATTR M1handleEncoderA() {
@@ -277,20 +279,10 @@ int getM2EncPos(){
 
 void actuateDriveTrain(int M1PWM, int M2PWM, bool brake = false){ //negative PWM values are backwards
   //modifier to account for difference in motors
-  double offSetMod = 1.1;
+  float offSetMod = getPWMOffsetModifier(M1PWM); //based on M1PWM - could be future problem
   M2PWM = M2PWM*offSetMod;
 
   if(brake){ //braking
-    // //M1
-    // digitalWrite(M1_IN1, LOW);
-    // digitalWrite(M1_IN2, LOW);
-    // analogWrite(M1_EN, 0);
-
-    // //M2
-    // digitalWrite(M2_IN1, LOW);
-    // digitalWrite(M2_IN2, LOW);
-    // analogWrite(M2_EN, 0);
-
     int PWMbrakeM1 = 5;
     int PWMbrakeM2 = 15;
 
@@ -362,6 +354,11 @@ void actuateDriveTrain(int M1PWM, int M2PWM, bool brake = false){ //negative PWM
     // Serial.println("M2 PWM delivered: ");
     // Serial.println(M2PWM);
   }
+}
+
+float getPWMOffsetModifier(int PWM){
+  // will be filled out with data based on offset testing
+  return offset;
 }
 
 double metersToEncTicks(double m, bool wheel = true){
@@ -902,11 +899,8 @@ void velocityTest(){
   int PWMinc = 5;
   int PWMminInc = 1;
 
-  int takeoffPWM = 60; //need to run takeoff test to validate this number
-  int takeOffMillis = 250; //how long the robot is given to takeoff from standstill
-
   int accelMillis = 1500; //how long the robot is given to speed up to vel
-  int velSampleMillis = 2000; //sampling period once at speed
+  int velSampleMillis = 1500; //sampling period once at speed
 
   Serial.println("PWM value,velocityM1,velocityM2");
 
@@ -946,6 +940,68 @@ void velocityTest(){
     }
     //wait for the button to be pressed
     actionButtonWait(false);
+  }
+}
+
+void OffsetTest(){
+  int PWMTestVal = 70;
+  int PWMInc = 20;
+  //testingPeriod
+  int testMillis = 1500;
+
+  std::vector<std::pair<int, float>> offsetStorage; //PWM then offset
+
+  bool testingValues = true;
+  while(testingValues){
+    bool offsetFound = false;
+    bool accepted = false;
+    offset = 1.0;
+    while(!offsetFound){
+      if(!accepted){
+        Serial.println("Enter offset to test: ");
+        offset = Serial.parseFloat(); //offset variable is used in actauteDriveTrain
+        Serial.println("You enterred: ");
+        Serial.println(offset);
+
+        actuateDriveTrain(PWMTestVal,PWMTestVal);
+        delay(testMillis);
+        actuateDriveTrain(0,0); //stop
+      }else{
+        offsetFound = true;
+        std::pair<int, float> tempPair = {PWMTestVal, offset};
+        offsetStorage.push_back(tempPair);
+      }
+
+      if(!offsetFound){
+        accepted = false;
+        Serial.println("Is this value good? (y/n): ");
+        char accept = Serial.read();
+        if (accept == 'y' || accept == 'Y') {
+          accepted = true;
+          Serial.println("You selected yes");
+        } else if (accept == 'n' || accept == 'N') {
+          accepted = false;
+          Serial.println("You selected no");
+        } else {
+          Serial.println("Invalid input, please enter 'y' or 'n'.");
+          accepted = false;
+        }
+      }
+    }
+
+    PWMTestVal += PWMInc;
+    if(PWMTestVal > 255){
+      testingValues = false;
+    }
+  }
+
+  //printout for excell
+  Serial.println("PWM value,offset");
+
+  for(size_t i = 0; i < offsetStorage.size(); i++){
+    Serial.print(offsetStorage.at(i).first);
+    Serial.print(",");
+    Serial.println(offsetStorage.at(i).second, 2);
   }
 }
 
