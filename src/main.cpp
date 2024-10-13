@@ -959,9 +959,20 @@ void OffsetTest(){
     while(!offsetFound){
       if(!accepted){
         Serial.println("Enter offset to test: ");
-        offset = Serial.parseFloat(); //offset variable is used in actauteDriveTrain
-        Serial.println("You enterred: ");
-        Serial.println(offset);
+
+        while(true){
+          float tempOffset = -1;
+          if (Serial.available() > 0) {
+            tempOffset = Serial.parseFloat(); //offset variable is used in actauteDriveTrain
+          }
+
+          if(tempOffset > 0 && tempOffset < 5){
+            Serial.println("You enterred: ");
+            Serial.println(tempOffset);
+            offset = tempOffset;
+            break; //exit blocking loop once input is received
+          }
+        }
 
         actuateDriveTrain(PWMTestVal,PWMTestVal);
         delay(testMillis);
@@ -975,25 +986,30 @@ void OffsetTest(){
       if(!offsetFound){
         accepted = false;
         Serial.println("Is this value good? (y/n): ");
-        char accept = Serial.read();
-        if (accept == 'y' || accept == 'Y') {
-          accepted = true;
-          Serial.println("You selected yes");
-        } else if (accept == 'n' || accept == 'N') {
-          accepted = false;
-          Serial.println("You selected no");
-        } else {
-          Serial.println("Invalid input, please enter 'y' or 'n'.");
-          accepted = false;
+        while(true){
+          if (Serial.available() > 0) {
+            char accept = Serial.read();
+            if (accept == 'y' || accept == 'Y') {
+              accepted = true;
+              Serial.println("You selected yes");
+              break;
+
+            } else if (accept == 'n' || accept == 'N') {
+              accepted = false;
+              Serial.println("You selected no");
+              break;
+            }
+          }
         }
       }
     }
-
-    PWMTestVal += PWMInc;
-    if(PWMTestVal > 255){
-      testingValues = false;
-    }
   }
+
+  PWMTestVal += PWMInc;
+  if(PWMTestVal > 255){
+    testingValues = false;
+  }
+
 
   //printout for excell
   Serial.println("PWM value,offset");
