@@ -215,6 +215,30 @@ double velError = 0;
 double encDiffPrint = 0;
 float offset = 1;
 
+//data from testing -KEEP
+std::vector<std::pair<int, float>> offsetResponseNEG = {
+  {-70, 1.15},
+  {-90, 1.15},
+  {-110, 1.17},
+  {-130, 1.17},
+  {-150, 1.19},
+  {-170, 1.23},
+  {-190, 1.21},
+  {-210, 1.15},  
+};
+
+std::vector<std::pair<int, float>> offsetResponsePOS = {
+  {70, 0.95},
+  {90, 1.0},
+  {110, 0.98},
+  {130, 1.04},
+  {150, 1.03},
+  {190, 1.05},
+  {210, 1.05},
+  {230, 1.05},
+};
+
+
 //M1 interupts
 void IRAM_ATTR M1handleEncoderA() {
   bool newA = digitalRead(M1_ENCODER_PIN_A);
@@ -277,9 +301,49 @@ int getM2EncPos(){
   return int(M2_encoderPos*0.99); //0.985 perfect for backwards //0.9917 empirically accurate
 }
 
+float interpolate(int x, bool pos){
+  if(pos){
+    for (size_t i = 0; i < offsetResponsePOS.size() - 1; ++i) {
+      int x0 = offsetResponsePOS[i].first;
+      int x1 = offsetResponsePOS[i + 1].first;
+
+      if (x >= x0 && x <= x1) {
+        float y0 = offsetResponsePOS[i].second;
+        float y1 = offsetResponsePOS[i + 1].second;
+        // Perform interpolation
+        return y0 + (float)(x - x0) * (y1 - y0) / (x1 - x0);
+      }
+    }
+    if (x < offsetResponsePOS.front().first) return offsetResponsePOS.front().second;
+    if (x > offsetResponsePOS.back().first) return offsetResponsePOS.back().second;
+  }else{
+    for (size_t i = 0; i < offsetResponseNEG.size() - 1; ++i) {
+      int x0 = offsetResponseNEG[i].first;
+      int x1 = offsetResponseNEG[i + 1].first;
+
+      if (x >= x0 && x <= x1) {
+        float y0 = offsetResponseNEG[i].second;
+        float y1 = offsetResponseNEG[i + 1].second;
+        // Perform interpolation
+        return y0 + (float)(x - x0) * (y1 - y0) / (x1 - x0);
+      }
+    }
+    if (x < offsetResponseNEG.front().first) return offsetResponseNEG.front().second;
+    if (x > offsetResponseNEG.back().first) return offsetResponseNEG.back().second;
+  }
+
+  Serial.println("Could not interpolate: outputting offset = 1");
+  return 1.0; //failsafe incase the code doesn't work
+}
+
 float getPWMOffsetModifier(int PWM){
-  // will be filled out with data based on offset testing
-  return offset;
+  bool pos;
+  if(PWM > 0){ //using positive data
+    pos = true;
+  }else{
+    pos = false;
+  }
+  return interpolate(PWM, pos);
 }
 
 void actuateDriveTrain(int M1PWM, int M2PWM, bool brake = false){ //negative PWM values are backwards
