@@ -450,7 +450,6 @@ double encTicksToMeters(double ticks, bool wheel = true){
 
 int velocityToPWM(double velocity){
   //input velocity in rpm
-
   bool posVelocityRequest;
   if(velocity > 0){
     posVelocityRequest = true;
@@ -471,28 +470,28 @@ int velocityToPWM(double velocity){
   float b;
   float c;
 
-  if(posVelocityRequest){
-    a = ;
-    b = ;
-    c = - velocity;
-  }else{
-    a = ;
-    b = ;
-    c = + velocity;
+  if(posVelocityRequest){ //positive case
+    a = -0.0166;
+    b = 6.7173;
+    c = -247.48 - velocity;
+  }else{ //negative case
+    a = 0.0129;
+    b = 5.3007;
+    c = 118.54 + velocity;
   }
 
   // Calculate discriminant
-  float discriminant = b * b - 4 * a * c;
+  float discriminant = b*b - 4*a*c;
 
   if (discriminant < 0) {
     Serial.println("No real solutions to PWM conversion returning 0 PWM");
     return 0;
   } else {
     // Two possible solutions for x
-    float x1 = (-b + sqrt(discriminant)) / (2 * a);
-    float x2 = (-b - sqrt(discriminant)) / (2 * a);
+    float x1 = (-b + sqrt(discriminant)) / (2*a);
+    float x2 = (-b - sqrt(discriminant)) / (2*a);
 
-    if(x1 < x2){
+    if(abs(x1) < abs(x2)){
       PWMReturn = x1;
     }else{
       PWMReturn = x2;
@@ -500,13 +499,12 @@ int velocityToPWM(double velocity){
   }
 
   //if the PWM value is less than the cutoff point set it to the cutoff point
-  if(PWMReturn < relationCutoff){
-    PWMReturn = relationCutoff; //commenting out for now
-  }
-
-  //if the velocity request was negative we need to flip the calculation back to negative PWM
-  if(!posVelocityRequest){
-    PWMReturn = -PWMReturn;
+  if(abs(PWMReturn) < relationCutoff){
+    if((PWMReturn) > 0){
+      PWMReturn = relationCutoff; //commenting out for now
+    }else{
+      PWMReturn = -relationCutoff; //commenting out for now
+    }
   }
 
   return int(PWMReturn);
