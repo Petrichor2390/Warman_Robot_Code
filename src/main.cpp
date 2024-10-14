@@ -140,7 +140,7 @@ bool posGoalReached = true; //true if the current goal has been reached - starts
 int currentPosGoalIndex = -1; //-1 for no goal assigned yet, the index of the current goal in the goal list
 bool robotStopped = false;
 double posTargetPosition[] = {
-  0.85,
+  0.6,
 };
 
 // double posTargetPosition[] = {
@@ -236,6 +236,15 @@ std::vector<std::pair<int, float>> offsetResponsePOS = {
   {190, 1.05},
   {210, 1.05},
   {230, 1.05},
+};
+
+std::vector<std::vector<double>> brakingProfile = {
+  //{start vel applicable, end vel applicable, M1_PWM brake, M2_PWM brake, off wait M1, off wait M2}
+  {0, 280, 1, 1, 5, 5},
+  {280, 350, 1, 1, 5, 5},
+  {350, 500, 1, 1, 2, 2},
+  // {0, -275, 1, 1, 20, 20},
+  // {-275, -500, 1, 5, 40, 40},
 };
 
 //M1 interupts
@@ -335,6 +344,39 @@ float interpolate(int x, bool pos){
   return 1.0; //failsafe incase the code doesn't work
 }
 
+std::vector<double> getBrakingProfile(double velocity){
+  //find which braking profile to use
+  // Serial.print("choose brake profile from velocity: ");
+  // Serial.println(velocity);
+  int brakingProfileIndex = -1; //will change if it doesn't it is printed
+  //pos case
+  for(size_t i = 0; i < brakingProfile.size(); i++){
+    if(velocity > brakingProfile.at(i).at(0) && velocity < brakingProfile.at(i).at(1)){
+      brakingProfileIndex = i;
+    }
+  }
+  if(brakingProfileIndex == -1 && velocity < 0){
+    //neg case
+    for(size_t i = 0; i < brakingProfile.size(); i++){
+      if(abs(velocity) > abs(brakingProfile.at(i).at(0)) && abs(velocity) < abs(brakingProfile.at(i).at(1))){
+        brakingProfileIndex = i;
+      }
+    }
+  }
+
+  if(brakingProfileIndex == -1){
+    Serial.println("Could not find braking profile returning default profile");
+  }else{
+    Serial.println("Using braking profile index: ");
+    Serial.println(brakingProfileIndex);
+    return brakingProfile.at(brakingProfileIndex);
+  }
+
+  //safety default profile if not found
+  return brakingProfile.at(0);
+
+}
+
 float getPWMOffsetModifier(int PWM){
   bool pos;
   if(PWM > 0){ //using positive data
@@ -345,6 +387,37 @@ float getPWMOffsetModifier(int PWM){
   return interpolate(PWM, pos);
 }
 
+void motorPinInterface(int motorID, int PWM){
+  //normalise PWM
+  if(PWM > 255){
+    PWM = 255;
+  }else if(PWM < -255){
+    PWM = -255;
+  }
+  
+  if(motorID == 1){ //M1
+    if (PWM > 0) {
+      digitalWrite(M1_IN1, HIGH);
+      digitalWrite(M1_IN2, LOW);
+    } else if (PWM < 0) {
+      digitalWrite(M1_IN1, LOW);
+      digitalWrite(M1_IN2, HIGH);
+    }
+    analogWrite(M1_EN, int(abs(PWM)));
+  }else if(motorID == 2){ //M2
+    if (PWM > 0) {
+      digitalWrite(M2_IN1, HIGH);
+      digitalWrite(M2_IN2, LOW);
+    } else if (PWM < 0) {
+      digitalWrite(M2_IN1, LOW);
+      digitalWrite(M2_IN2, HIGH);
+    }
+    analogWrite(M2_EN, int(abs(PWM)));
+  }else{
+    Serial.println("motorID invalid");
+  }
+}
+
 void actuateDriveTrain(int M1PWM, int M2PWM, bool brake = false){ //negative PWM values are backwards
   //modifier to account for difference in motors
   float offSetMod = getPWMOffsetModifier(M1PWM); //based on M1PWM - could be future problem
@@ -353,86 +426,128 @@ void actuateDriveTrain(int M1PWM, int M2PWM, bool brake = false){ //negative PWM
   M2PWM = M2PWM*offSetMod;
 
   if(brake){ //braking
-    int PWMbrakeM1 = 0;
-    int PWMbrakeM2 = 0;
+    //get braking profile to charactise brake
+    std::vector<double> brakingProfileApply = getBrakingProfile((M1_Vel_Save+M2_Vel_Save)/2); //use average velocity
 
-    int PWMOutM1 = 0;
-    int PWMOutM2 = 0;
+    // Serial.println("PWM M1: ");
+    // Serial.println(brakingProfileApply.at(2));
+    // Serial.println("PWM M2: ");
+    // Serial.println(brakingProfileApply.at(3));
+    // Serial.println("duty off M1 : ");
+    // Serial.println(brakingProfileApply.at(4));
+    // Serial.println("duty of M2: ");
+    // Serial.println(brakingProfileApply.at(5));
+
+    int PWMbrakeM1_n1 = brakingProfileApply.at(2);
+    int PWMbrakeM2_n1 = brakingProfileApply.at(3);
+
+    int PWMbrakeM1_n2 = 0;
+    int PWMbrakeM2_n2 = 0;
+
+    int PWMOutM1_n1 = 0;
+    int PWMOutM2_n1 = 0;
+    int PWMOutM1_n2 = 0;
+    int PWMOutM2_n2 = 0;
+
     if(M1_Rolling_Avg_Vel > 0){
-      PWMOutM1 = -PWMbrakeM1;
-      PWMOutM2 = -PWMbrakeM1;
+      PWMOutM1_n1 = -PWMbrakeM1_n1;
+      PWMOutM2_n1 = -PWMbrakeM1_n1;
+      PWMOutM1_n2 = -PWMbrakeM2_n2;
+      PWMOutM2_n2 = -PWMbrakeM1_n2;
     }else{
-      PWMOutM1 = PWMbrakeM1;
-      PWMOutM2 = PWMbrakeM2;
+      PWMOutM1_n1 = PWMbrakeM1_n1;
+      PWMOutM2_n1 = PWMbrakeM2_n1;
+      PWMOutM1_n2 = PWMbrakeM1_n1;
+      PWMOutM2_n2 = PWMbrakeM2_n2;
     }
+
+    analogWrite(M1_EN, 0);
+    analogWrite(M2_EN, 0);
+
+    //if the velocity is above a tolerance coast untill you get there
+    double avgVel = (abs(M1_Vel_Save)+abs(M2_Vel_Save))/2;
+    // int brakeCuttof = 275;
+    // bool coasting;
+    // if(avgVel > brakeCuttof){
+    //   coasting = true;
+    //   Serial.println("Coasting");
+    // }else{
+    //   coasting = false;
+    // }
+    // while(coasting){
+    //   delay(5);
+    //   Serial.println("Coasting");
+    //   avgVel = (abs(M1_Rolling_Avg_Vel)+abs(M2_Rolling_Avg_Vel))/2;
+    //   Serial.print("avgVel: ");
+    //   Serial.println(avgVel);
+
+    //   if(avgVel < (brakeCuttof-50)){
+    //     coasting = false;
+    //   }
+    // }
 
     //M1
-    if (PWMOutM1 > 0) {
-      digitalWrite(M1_IN1, HIGH);
-      digitalWrite(M1_IN2, LOW);
-    } else if (PWMOutM1 < 0) {
-      digitalWrite(M1_IN1, LOW);
-      digitalWrite(M1_IN2, HIGH);
-    }
-    analogWrite(M1_EN, int(abs(PWMOutM1)));
+    motorPinInterface(1, PWMOutM1_n1);
+    motorPinInterface(2, PWMOutM2_n1);
 
-    //M2
-    if (PWMOutM2 > 0) {
-      digitalWrite(M2_IN1, HIGH);
-      digitalWrite(M2_IN2, LOW);
-    } else if (PWMOutM2 < 0) {
-      digitalWrite(M2_IN1, LOW);
-      digitalWrite(M2_IN2, HIGH);
-    }
-    analogWrite(M2_EN, int(abs(PWMOutM2)));
+    bool stoppedFlag = false;
+    double velTol= 20;
+    int loopC = 0;
+    while(!stoppedFlag){
+      //if(duty cycle on)
+      //M1
+      if(loopC % static_cast<int>(brakingProfileApply.at(4)) == 0){//if first loop or divisable by off duty time, or we should be on for another loop
+        //on duty
+        motorPinInterface(1, PWMOutM1_n1);
 
+        // Serial.println("M1 on duty");
+      }else{
+        //off duty
+        motorPinInterface(1, -PWMOutM2_n1);
+        // Serial.println("M1 off duty");
+      }
+
+      //M2
+      if(loopC % static_cast<int>(brakingProfileApply.at(5)) == 0){//if first loop or divisable by off duty time, or we should be on for another loop
+        //on duty
+        motorPinInterface(2, PWMOutM2_n1);
+
+        // Serial.println("M2 on duty");
+      }else{
+        //off duty
+        motorPinInterface(2, -PWMOutM2_n1);
+        // Serial.println("M2 off duty");
+      }
+
+      avgVel = (abs(M1_Vel_Save)+abs(M2_Vel_Save))/2;
+      if(avgVel < velTol){
+        stoppedFlag = true;
+      }else{
+        delay(1); //loop speed
+        loopC++;
+      }
+    }
+
+    // Serial.println("BRAKING");
+    // analogWrite(M1_EN, 0);
+    // analogWrite(M2_EN, 0);
     // digitalWrite(M1_IN1, LOW);
     // digitalWrite(M1_IN2, LOW);
-    // analogWrite(M1_EN, 0);
-
-    // //M2
     // digitalWrite(M2_IN1, LOW);
     // digitalWrite(M2_IN2, LOW);
-    // analogWrite(M2_EN, 0);
 
   }else{ //driving
-    //normalise PWM if it comes in as invalid
-    if(M1PWM > 255){
-      M1PWM = 255;
-    }else if(M1PWM < -255){
-      M1PWM = -255;
-    }
-
-    if(M2PWM > 255){
-      M2PWM = 255;
-    }else if(M2PWM < -255){
-      M2PWM = -255;
-    }
-
     //M1
-    if (M1PWM > 0) {
-      digitalWrite(M1_IN1, HIGH);
-      digitalWrite(M1_IN2, LOW);
-    } else if (M1PWM < 0) {
-      digitalWrite(M1_IN1, LOW);
-      digitalWrite(M1_IN2, HIGH);
-    }
-    analogWrite(M1_EN, int(abs(M1PWM)));
+    motorPinInterface(1, M1PWM);
     // Serial.println("M1 PWM delivered: ");
     // Serial.println(M1PWM);
 
     //M2
-    if (M2PWM > 0) {
-      digitalWrite(M2_IN1, HIGH);
-      digitalWrite(M2_IN2, LOW);
-    } else if (M2PWM < 0) {
-      digitalWrite(M2_IN1, LOW);
-      digitalWrite(M2_IN2, HIGH);
-    }
-    analogWrite(M2_EN, int(abs(M2PWM)));
+    motorPinInterface(2, M2PWM);
     // Serial.println("M2 PWM delivered: ");
     // Serial.println(M2PWM);
   }
+  Serial.println("Left Actuate");
 }
 
 double metersToEncTicks(double m, bool wheel = true){
@@ -970,10 +1085,91 @@ void takeOffTest(){
 }
 
 void brakeTest(){
-  actuateDriveTrain(velocityToPWM(150), velocityToPWM(150));
-  delay(2000);
-  actuateDriveTrain(0,0, true);
-  delay(3000);
+  int testVel = 250;
+  int testVelInc = 5;
+
+  int accelTime = 500; //ms of accel before braking
+  int sampleTime = 50; //ms of sample
+  int accelEncTicks = metersToEncTicks(0.5);
+
+  Serial.println("AvgVel,brakingDistance,brakeTime");
+
+  while(true){
+    //waiting for button press
+    // Serial.println("waiting for press");
+    actionButtonWait(false);
+    // Serial.println("testing: ");
+    Serial.println(testVel);
+    int PWM = velocityToPWM(testVel);
+    actuateDriveTrain(PWM, PWM);
+    
+    //reset encoder pos
+    M1_encoderPos = 0;
+    M2_encoderPos = 0;
+
+    bool reachedPosFlag = false;
+    long int posReachStartTime = millis();
+    while(!reachedPosFlag){
+      double avgEncPos = (M1_encoderPos+getM2EncPos())/2;
+      if(abs(avgEncPos) > accelEncTicks){
+        reachedPosFlag = true;
+      }
+      // long int cTime = millis();
+      // if(cTime - posReachStartTime > 5000){
+      //   reachedPosFlag = true;
+
+      // }
+    }
+
+    //record speed
+    int M1_enc_save = M1_encoderPos;
+    int M2_enc_save = getM2EncPos();
+    //sampling time
+    delay(sampleTime);
+
+    int deltaEncM1 = M1_encoderPos - M1_enc_save;
+    int deltaEncM2 = getM2EncPos() - M2_enc_save;
+
+    double M1_MAXVel = ((double)deltaEncM1 / sampleTime) * 1000 * 60 / enc_Ticks_Per_Rot;
+    double M2_MAXVel = ((double)deltaEncM2 / sampleTime) * 1000 * 60 / enc_Ticks_Per_Rot;
+
+    long int startBrakeTime = micros();
+    long int stopBrakeTime = micros();
+    long int encTicksTempSave = M1_encoderPos;
+    actuateDriveTrain(0, 0, true); //brake
+    bool stoppedFlag = false;
+    double stoppedTol = 20; // both motors must be below this velocity to be considered stopped (RPM)
+
+    // Serial.println("Starting Stop Check");
+    while(!stoppedFlag){
+      // Serial.println(M1_Vel_Save);
+      Serial.println(M2_Vel_Save);
+
+      double avgVelCheckStopped = (abs(M1_Vel_Save)+abs(M2_Vel_Save))/2;
+      
+      if(avgVelCheckStopped < stoppedTol){
+        stopBrakeTime = micros();
+        stoppedFlag = true;
+      }
+    }
+
+    //calculate braking time
+    double brakingTime = (stopBrakeTime - startBrakeTime)/1000;
+    double avgVel = (M1_MAXVel+M2_MAXVel)/2;
+
+    //calculate braking distance
+    delay(100);
+    double brakingDistance = encTicksToMeters(M1_encoderPos-encTicksTempSave);
+
+    Serial.print(avgVel);
+    Serial.print(",");
+    Serial.print(brakingDistance, 6);
+    Serial.print(",");
+    Serial.println(brakingTime, 2);
+
+    //increment testvel
+    testVel += testVelInc;
+  }
 }
 
 void velocityTest(){
@@ -1349,11 +1545,12 @@ void setup() {
 void loop() {
   // calcRollingAvg();
   if(loopNo==0){
-    actionButtonWait(true);
+    actionButtonWait(false);
   }
 
   // StepperTest();
-  instructionRegisterManager();
+  // instructionRegisterManager();
+  brakeTest();
   // velocityTest();
   // OffsetTest();
 
