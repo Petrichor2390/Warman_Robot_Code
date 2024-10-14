@@ -241,8 +241,8 @@ std::vector<std::pair<int, float>> offsetResponsePOS = {
 std::vector<std::vector<double>> brakingProfile = {
   //{start vel applicable, end vel applicable, M1_PWM brake, M2_PWM brake, off wait M1, off wait M2}
   {0, 280, 1, 1, 5, 5},
-  {280, 350, 1, 1, 5, 5},
-  {350, 500, 1, 1, 2, 2},
+  {280, 350, 1, 1, 10, 10},
+  {350, 500, 1, 1, 15, 15},
   // {0, -275, 1, 1, 20, 20},
   // {-275, -500, 1, 5, 40, 40},
 };
@@ -486,9 +486,8 @@ void actuateDriveTrain(int M1PWM, int M2PWM, bool brake = false){ //negative PWM
     //   }
     // }
 
-    //M1
-    motorPinInterface(1, PWMOutM1_n1);
-    motorPinInterface(2, PWMOutM2_n1);
+    // motorPinInterface(1, PWMOutM1_n1);
+    // motorPinInterface(2, PWMOutM2_n1);
 
     bool stoppedFlag = false;
     double velTol= 20;
@@ -498,24 +497,23 @@ void actuateDriveTrain(int M1PWM, int M2PWM, bool brake = false){ //negative PWM
       //M1
       if(loopC % static_cast<int>(brakingProfileApply.at(4)) == 0){//if first loop or divisable by off duty time, or we should be on for another loop
         //on duty
-        motorPinInterface(1, PWMOutM1_n1);
+        motorPinInterface(1, -PWMOutM1_n1);
 
         // Serial.println("M1 on duty");
       }else{
         //off duty
-        motorPinInterface(1, -PWMOutM2_n1);
+        motorPinInterface(1, PWMOutM2_n1);
         // Serial.println("M1 off duty");
       }
 
       //M2
       if(loopC % static_cast<int>(brakingProfileApply.at(5)) == 0){//if first loop or divisable by off duty time, or we should be on for another loop
         //on duty
-        motorPinInterface(2, PWMOutM2_n1);
-
+        motorPinInterface(2, -PWMOutM2_n1);
         // Serial.println("M2 on duty");
       }else{
         //off duty
-        motorPinInterface(2, -PWMOutM2_n1);
+        motorPinInterface(2, PWMOutM2_n1);
         // Serial.println("M2 off duty");
       }
 
@@ -523,7 +521,7 @@ void actuateDriveTrain(int M1PWM, int M2PWM, bool brake = false){ //negative PWM
       if(avgVel < velTol){
         stoppedFlag = true;
       }else{
-        delay(1); //loop speed
+        delay(10); //loop speed - MAY BE weird response because of this
         loopC++;
       }
     }
