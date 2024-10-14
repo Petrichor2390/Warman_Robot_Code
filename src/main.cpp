@@ -241,10 +241,15 @@ std::vector<std::pair<int, float>> offsetResponsePOS = {
 std::vector<std::vector<double>> brakingProfile = {
   //{start vel applicable, end vel applicable, M1_PWM brake, M2_PWM brake, off wait M1, off wait M2}
   {0, 280, 1, 1, 5, 5},
-  {280, 350, 1, 1, 10, 10},
-  {350, 500, 1, 1, 15, 15},
+  {280, 350, 1, 1, 5, 5},
+  {350, 500, 1, 1, 5, 5},
   // {0, -275, 1, 1, 20, 20},
   // {-275, -500, 1, 5, 40, 40},
+};
+
+std::vector<std::pair<int, float>> brakeDistanceResponse = {
+  //velocity, braking distance m
+  {20, 0.02},
 };
 
 //M1 interupts
@@ -309,39 +314,48 @@ int getM2EncPos(){
   return int(M2_encoderPos*0.99); //0.985 perfect for backwards //0.9917 empirically accurate
 }
 
-float interpolate(int x, bool pos){
-  if(pos){
-    for (size_t i = 0; i < offsetResponsePOS.size() - 1; ++i) {
-      int x0 = offsetResponsePOS[i].first;
-      int x1 = offsetResponsePOS[i + 1].first;
+float interpolate(int x, int dataSet = 1){
+  std::vector<std::pair<int, float>> data;
+  switch (dataSet)
+  {
+  case 1:
+    //positive offset responsea
+    data = offsetResponsePOS;
+    break;
 
-      if (x >= x0 && x <= x1) {
-        float y0 = offsetResponsePOS[i].second;
-        float y1 = offsetResponsePOS[i + 1].second;
-        // Perform interpolation
-        return y0 + (float)(x - x0) * (y1 - y0) / (x1 - x0);
-      }
-    }
-    if (x < offsetResponsePOS.front().first) return offsetResponsePOS.front().second;
-    if (x > offsetResponsePOS.back().first) return offsetResponsePOS.back().second;
-  }else{
-    for (size_t i = 0; i < offsetResponseNEG.size() - 1; ++i) {
-      int x0 = offsetResponseNEG[i].first;
-      int x1 = offsetResponseNEG[i + 1].first;
+  case 2:
+    //negative offset response
+    data = offsetResponseNEG;
+    break;
 
-      if (x >= x0 && x <= x1) {
-        float y0 = offsetResponseNEG[i].second;
-        float y1 = offsetResponseNEG[i + 1].second;
-        // Perform interpolation
-        return y0 + (float)(x - x0) * (y1 - y0) / (x1 - x0);
-      }
-    }
-    if (x < offsetResponseNEG.front().first) return offsetResponseNEG.front().second;
-    if (x > offsetResponseNEG.back().first) return offsetResponseNEG.back().second;
+  case 3:
+    //
+    data = brakeDistanceResponse;
+    break;
+  
+  default:
+    break;
   }
 
-  Serial.println("Could not interpolate: outputting offset = 1");
-  return 1.0; //failsafe incase the code doesn't work
+  for(size_t i = 0; i < data.size() - 1; ++i) {
+    int x0 = data[i].first;
+    int x1 = data[i + 1].first;
+
+    if (x >= x0 && x <= x1) {
+      float y0 = data[i].second;
+      float y1 = data[i + 1].second;
+      // Perform interpolation
+      return y0 + (float)(x - x0) * (y1 - y0) / (x1 - x0);
+    }
+  }
+  if (x < data.front().first) return data.front().second;
+  if (x > data.back().first) return data.back().second;
+
+  Serial.println("Could not interpolate: returning default");
+  if(dataSet == 1 || dataSet == 2){
+    return 1.0;
+  }
+  return 0.0; //failsafe incase the code doesn't work
 }
 
 std::vector<double> getBrakingProfile(double velocity){
@@ -378,13 +392,13 @@ std::vector<double> getBrakingProfile(double velocity){
 }
 
 float getPWMOffsetModifier(int PWM){
-  bool pos;
+  int offSetData = 0;
   if(PWM > 0){ //using positive data
-    pos = true;
+    offSetData = 1;
   }else{
-    pos = false;
+    offSetData = 2;
   }
-  return interpolate(PWM, pos);
+  return interpolate(PWM, offSetData);
 }
 
 void motorPinInterface(int motorID, int PWM){
@@ -461,53 +475,26 @@ void actuateDriveTrain(int M1PWM, int M2PWM, bool brake = false){ //negative PWM
       PWMOutM2_n2 = PWMbrakeM2_n2;
     }
 
-    analogWrite(M1_EN, 0);
-    analogWrite(M2_EN, 0);
-
-    //if the velocity is above a tolerance coast untill you get there
     double avgVel = (abs(M1_Vel_Save)+abs(M2_Vel_Save))/2;
-    // int brakeCuttof = 275;
-    // bool coasting;
-    // if(avgVel > brakeCuttof){
-    //   coasting = true;
-    //   Serial.println("Coasting");
-    // }else{
-    //   coasting = false;
-    // }
-    // while(coasting){
-    //   delay(5);
-    //   Serial.println("Coasting");
-    //   avgVel = (abs(M1_Rolling_Avg_Vel)+abs(M2_Rolling_Avg_Vel))/2;
-    //   Serial.print("avgVel: ");
-    //   Serial.println(avgVel);
-
-    //   if(avgVel < (brakeCuttof-50)){
-    //     coasting = false;
-    //   }
-    // }
-
-    // motorPinInterface(1, PWMOutM1_n1);
-    // motorPinInterface(2, PWMOutM2_n1);
-
     bool stoppedFlag = false;
     double velTol= 20;
     int loopC = 0;
     while(!stoppedFlag){
       //if(duty cycle on)
       //M1
-      if(loopC % static_cast<int>(brakingProfileApply.at(4)) == 0){//if first loop or divisable by off duty time, or we should be on for another loop
+      if(loopC == 0 || loopC % static_cast<int>(brakingProfileApply.at(4)) == 0){
         //on duty
         motorPinInterface(1, -PWMOutM1_n1);
 
         // Serial.println("M1 on duty");
       }else{
         //off duty
-        motorPinInterface(1, PWMOutM2_n1);
+        motorPinInterface(1, PWMOutM1_n1);
         // Serial.println("M1 off duty");
       }
 
       //M2
-      if(loopC % static_cast<int>(brakingProfileApply.at(5)) == 0){//if first loop or divisable by off duty time, or we should be on for another loop
+      if(loopC == 0 || loopC % static_cast<int>(brakingProfileApply.at(5)) == 0){
         //on duty
         motorPinInterface(2, -PWMOutM2_n1);
         // Serial.println("M2 on duty");
@@ -525,15 +512,6 @@ void actuateDriveTrain(int M1PWM, int M2PWM, bool brake = false){ //negative PWM
         loopC++;
       }
     }
-
-    // Serial.println("BRAKING");
-    // analogWrite(M1_EN, 0);
-    // analogWrite(M2_EN, 0);
-    // digitalWrite(M1_IN1, LOW);
-    // digitalWrite(M1_IN2, LOW);
-    // digitalWrite(M2_IN1, LOW);
-    // digitalWrite(M2_IN2, LOW);
-
   }else{ //driving
     //M1
     motorPinInterface(1, M1PWM);
@@ -986,7 +964,11 @@ bool posGoalManager(){
   VelPIDCalculation();
 
   //check if the robot is within tolerance of the goal
-  double pos_Tolerance = metersToEncTicks(0.02, true); //0.015 prev
+  double pos_Tolerance = metersToEncTicks(0.035, true); //0.015 prev
+
+  //calculate tolerance based on speed - DATA NOT READY FUTURE CODE
+  // int inAvgVel = static_cast<int>((M1_Vel_Save+M2_Vel_Save)/2);
+  // double pos_Tolerance = interpolate(inAvgVel, 3); //iterpolate using the correct dataset
 
   bool ret = false;
   //if both motors are within tolerance then brake and consider the goal reached
