@@ -198,6 +198,7 @@ int instructionRegistry[7][2] = {
 //   {0,1},
 
 //   //test full movement
+  // {2,0},
   {1,0},
   {1,0},
   {1,0},
@@ -1666,7 +1667,7 @@ void instructionRegisterManager(){
           break;
 
         case 2:
-          //run servo unfolding function
+          ServoTest();
           break;
 
         case 3:
@@ -1818,10 +1819,10 @@ void setup() {
 
   //Servo setup
   //commented out for now to avoid braking the servos
-  // servoLink1.attach(SERVO_LINK1_PIN);
-  // servoLink2.attach(SERVO_LINK2_PIN);
-  // servoLink1.write(servoLink1_Starting_Angle);
-  // servoLink2.write(servoLink2_Starting_Angle);
+  servoLink1.attach(SERVO_LINK1_PIN);
+  servoLink2.attach(SERVO_LINK2_PIN);
+  servoLink1.write(servoLink1_Starting_Angle);
+  servoLink2.write(servoLink2_Starting_Angle);
 
   //Action button setup
   pinMode(ACTION_BUTTON_PIN, INPUT);
