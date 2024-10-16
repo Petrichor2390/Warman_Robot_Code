@@ -192,41 +192,42 @@ int armTargetPosition[] = { //example values
 //main instructions
 int currentInstructionIndex = 0;
 bool currentInstructionStarted = false;
-// int instructionRegistry[6][2] = {
-// //   //test move and arm
-// //   {0,1},
-// //   {0,1},
+int instructionRegistry[7][2] = {
+//   //test move and arm
+//   {0,1},
+//   {0,1},
 
-// //   //test full movement
-//   {1,0},
-//   {1,0},
-//   {1,0},
-//   {1,0},
-//   {1,0},
-//   {1,0},
-// };
+//   //test full movement
+  {1,0},
+  {1,0},
+  {1,0},
+  {3,1000}, //delay
+  {1,0},
+  {1,0},
+  {1,0},
+};
 
 //full run example
-int instructionRegistry[18][2] = {
-  {0,1}, //short pillar
-  {0,1}, //tall pillar
-  {0,1}, //0 pos
-  {1,0}, // move to ball 3
-  {0,1}, // RHS ball
-  {0,1}, //0 pos
-  {1,0}, // move to ball 4
-  {0,1}, //LHS ball
-  {0,1}, //0 pos
-  {1,0}, //move to hole
-  {3,1000}, //delay
-  {1,0}, //move to ball 5
-  {0,1}, //LHS ball
-  {0,1}, //zero pos
-  {1,0}, //move to ball 6
-  {0,1}, //RHS ball
-  {0,1}, // zero pos
-  {1,0}, //move to hole
-};
+// int instructionRegistry[18][2] = {
+//   {0,1}, //short pillar
+//   {0,1}, //tall pillar
+//   {0,1}, //0 pos
+//   {1,0}, // move to ball 3
+//   {0,1}, // RHS ball
+//   {0,1}, //0 pos
+//   {1,0}, // move to ball 4
+//   {0,1}, //LHS ball
+//   {0,1}, //0 pos
+//   {1,0}, //move to hole
+//   {3,1000}, //delay
+//   {1,0}, //move to ball 5
+//   {0,1}, //LHS ball
+//   {0,1}, //zero pos
+//   {1,0}, //move to ball 6
+//   {0,1}, //RHS ball
+//   {0,1}, // zero pos
+//   {1,0}, //move to hole
+// };
 
 //instruction registry legend
 //first number
@@ -1018,22 +1019,22 @@ bool correctPosition(double targetPos_Meters, double tolerance_Meters){ //tagget
   bool M2Accept = false;
 
   //calculate if each enc pos is acceptable
-  if(abs(encM1D-encPosTarget) < tol){
+  if(abs(encM1D) < tol){
     M1Accept = true;
   }
-  if(abs(encM2D-encPosTarget) < tol){
+  if(abs(encM2D) < tol){
     M2Accept = true;
   }
 
   //find needed direction for each motor (false backwards true forwards)
   bool dirM1;
   bool dirM2;
-  if(encM1D > encPosTarget){
+  if(M1_enc > encPosTarget){
     dirM1 = false;
   }else{
     dirM1 = true;
   }
-  if(encM2D > encPosTarget){
+  if(M2_enc > encPosTarget){
     dirM2 = false;
   }else{
     dirM2 = true;
@@ -1066,7 +1067,7 @@ bool correctPosition(double targetPos_Meters, double tolerance_Meters){ //tagget
     ret = false;
     actuateDriveTrain(PWM1, PWM2);
     delay(10); //allow a period
-    actuateDriveTrain(0,0);
+    actuateDriveTrain(0,0, true);
   }
 
   return ret; //placeholder
@@ -1294,7 +1295,7 @@ bool posGoalManager(){
 
     bool correctPos = false;
     while(!correctPos){
-      correctPos = correctPosition(posTargetPosition[currentPosGoalIndex], 0.01); //apply 1cm tolerance
+      correctPos = correctPosition(posTargetPosition[currentPosGoalIndex], 0.002); //apply 1cm tolerance
     }
 
     ret = true;
