@@ -92,7 +92,7 @@ const int TRANSLATE_MIN_SPEED = 100; //otherwise velocity PID fucks up becuase o
 int min_Takeoff_PWM = 70; //was 63 70 with new wheels
 const double WHEEL_CIRCUMFERANCE_M1 = 0.141629; //in meters
 const double WHEEL_CIRCUMFERANCE_M2 = WHEEL_CIRCUMFERANCE_M1;//0.138;
-double targetBrakeVel = 150; //velocity target for braking
+double targetBrakeVel = 150; //velocity target for braking was 150
 
 //rolling average velocity
 const int roll_N = 3;
@@ -121,7 +121,7 @@ bool dirReverseFlag = false; //true if the robot has just changes direction
 
 //EncDiff PID ##################################################################
 double Enc_input, Enc_output, Enc_setpoint = 0;
-double Enc_Kp = 20000*2, Enc_Ki = 0, Enc_Kd = 0; //p = 30000 //i= 500
+double Enc_Kp = 20000, Enc_Ki = 0, Enc_Kd = 0; //p = 30000 //i= 500 //CHANGE BACK TO *2 p
 
 PID enc_PID(&Enc_input, &Enc_output, &Enc_setpoint, Enc_Kp, Enc_Ki, Enc_Kd, DIRECT);
 
@@ -144,61 +144,89 @@ bool robotStopped = false;
 //   0.1,
 // };
 
+
+//OLD POSITIONS
+// double posTargetPosition[] = {
+//   -0.35-0.005,
+//   -0.45-0.005,
+//   0.20725-0.005,
+//   0.5-0.005,
+//   0.4-0.005,
+//   0.20725-0.005,
+// };
+
+//new positions
 double posTargetPosition[] = {
-  -0.35,
-  -0.45,
-  0.4,
-  0.5,
-  0.20725,
+  -0.34,
+  -0.451,
+  0.216,
+  0.509,
+  0.386,
+  0.216,
 };
+
+
 
 //arm positions
 bool armGoalReached = true; //true if the arm goal has been reached - starts as true to avoid startup issues
 int currentArmGoalIndex = 0; //-1 for no goal assigned yet
-int pillarLowPos = 1310; //find these values through testing
-int pillarHighPos = -1150;
-int floorRHS = -1505;
-int floorLHS = 1470;
+int pillarLHSPos = 1300; //find these values through testing
+int pillarRHSPos = -1150;
+int floorRHS = -1500; //was 1490
+int floorLHS = 1480; //was 1470
 int currentArmPosition = 0;
 int armTargetPosition[] = { //example values
+  pillarLHSPos,
+  pillarRHSPos,
+  0,
   floorRHS,
   0,
+  floorLHS,
+  0,
+  floorRHS,
+  0,
+  floorLHS,
   0,
 };
 
 //main instructions
 int currentInstructionIndex = 0;
 bool currentInstructionStarted = false;
-int instructionRegistry[5][2] = {
-  // {0,1},
-  // {0,1},
-  // {0,1},
+// int instructionRegistry[6][2] = {
+// //   //test move and arm
+// //   {0,1},
+// //   {0,1},
 
-
-  {1,0},
-  {1,0},
-  {1,0},
-  {1,0},
-  {1,0},
-  // {1,0},
-  // {1,0},
-
-  // {1,0}
-};
+// //   //test full movement
+//   {1,0},
+//   {1,0},
+//   {1,0},
+//   {1,0},
+//   {1,0},
+//   {1,0},
+// };
 
 //full run example
-// int instructionRegistry[10][2] = {
-//   {0,1}, //short pillar
-//   {0,1}, //tall pillar
-//   {1,0}, // move to ball 3
-//   {0,1}, // RHS ball
-//   {1,0}, // move to ball 4
-//   {0,1}, //LHS ball
-//   {1,0}, //move to ball 5
-//   {0,1}, //LHS ball
-//   {1,0}, //move to ball 6
-//   {0,1}, //RHS ball
-// };
+int instructionRegistry[18][2] = {
+  {0,1}, //short pillar
+  {0,1}, //tall pillar
+  {0,1}, //0 pos
+  {1,0}, // move to ball 3
+  {0,1}, // RHS ball
+  {0,1}, //0 pos
+  {1,0}, // move to ball 4
+  {0,1}, //LHS ball
+  {0,1}, //0 pos
+  {1,0}, //move to hole
+  {3,1000}, //delay
+  {1,0}, //move to ball 5
+  {0,1}, //LHS ball
+  {0,1}, //zero pos
+  {1,0}, //move to ball 6
+  {0,1}, //RHS ball
+  {0,1}, // zero pos
+  {1,0}, //move to hole
+};
 
 //instruction registry legend
 //first number
@@ -207,6 +235,7 @@ int instructionRegistry[5][2] = {
   //3 = delay
 //second number
   //1 = move arm to next position in goal list
+  //if first number is 3 - second number represents delay time
 
 
 //temporary variables used for testing purposes
@@ -331,57 +360,57 @@ std::vector<std::pair<int, float>> brakeDistanceResponsePOS = {
 };
 
 std::vector<std::pair<int, float>> brakeDistanceResponseNEG = {
-{125,	0.025},
-{175,	0.048144},
-{171,	0.046698},
-{176,	0.048289},
-{177,	0.046987},
-{172,	0.047421},
-{177,	0.048289},
-{178,	0.04959},
-{175,	0.04959},
-{181,	0.052337},
-{188,	0.053204},
-{189,	0.05306},
-{194,	0.054505},
-{200,	0.05624},
-{209,	0.059566},
-{211,	0.062023},
-{218,	0.064915},
-{228,	0.067951},
-{232,	0.082553},
-{235,	0.0853},
-{236,	0.091951},
-{240,	0.087324},
-{243,	0.089204},
-{252,	0.093975},
-{253,	0.091372},
-{252,	0.09542},
-{264,	0.095276},
-{263,	0.100047},
-{267,	0.097155},
-{268,	0.102938},
-{284,	0.103661},
-{275,	0.105975},
-{282,	0.105685},
-{289,	0.11089},
-{293,	0.108432},
-{299,	0.114794},
-{299,	0.110601},
-{310,	0.114215},
-{304,	0.115227},
-{313,	0.11624},
-{320,	0.118553},
-{314,	0.122312},
-{324,	0.118119},
-{320,	0.125203},
-{325,	0.125059},
-{335,	0.156721},
-{340,	0.162215},
-{346,	0.132577},
-{352,	0.168576},
-{356,	0.167564},
-{363,	0.168432},
+{125,	0.04},//0.025
+{175,	0.0505512},
+{171,	0.0490329},
+{176,	0.05070345},
+{177,	0.04933635},
+{172,	0.04979205},
+{177,	0.05070345},
+{178,	0.0520695},
+{175,	0.0520695},
+{181,	0.05495385},
+{188,	0.0558642},
+{189,	0.055713},
+{194,	0.05723025},
+{200,	0.059052},
+{209,	0.0625443},
+{211,	0.06512415},
+{218,	0.06816075},
+{228,	0.07134855},
+{232,	0.08668065},
+{235,	0.089565},
+{236,	0.09654855},
+{240,	0.0916902},
+{243,	0.0936642},
+{252,	0.09867375},
+{253,	0.0959406},
+{252,	0.100191},
+{264,	0.1000398},
+{263,	0.10504935},
+{267,	0.10201275},
+{268,	0.1080849},
+{284,	0.10884405},
+{275,	0.11127375},
+{282,	0.11096925},
+{289,	0.1164345},
+{293,	0.1138536},
+{299,	0.1205337},
+{299,	0.11613105},
+{310,	0.11992575},
+{304,	0.12098835},
+{313,	0.122052},
+{320,	0.12448065},
+{314,	0.1284276},
+{324,	0.12402495},
+{320,	0.13146315},
+{325,	0.13131195},
+{335,	0.16455705},
+{340,	0.17032575},
+{346,	0.13920585},
+{352,	0.1770048},
+{356,	0.1759422},
+{363,	0.1768536},
 };
 
 //M1 interupts
@@ -706,8 +735,8 @@ int velocityToPWM(double velocity){
   }
   
   double PWMReturn;
-  double relationCutoffPOS = 52+5;
-  double relationCutoffNEG = -63-5;
+  double relationCutoffPOS = 52+5; //was +5
+  double relationCutoffNEG = -63-10;
 
   //quadratic formula co-efficients
   float a;
@@ -760,10 +789,33 @@ int velocityToPWM(double velocity){
 
 void armMove(int pos){
   //check that the value is in range
-  int sendPos = pos - currentArmPosition;
-  stepper->move(sendPos);
-  currentArmPosition = pos;
-  delay(3500);
+  // int sendPos = pos - currentArmPosition;
+  // stepper->moveTo(sendPos);
+  // currentArmPosition = pos;
+  bool zeroTarget = false;
+  if(pos == 0){
+    zeroTarget = true;
+  }
+
+  int zeroTol = 1;
+
+  stepper->moveTo(pos);
+  bool moveComplete = false;
+  int currentPos = 0;
+  while(!moveComplete){
+    int currentPos = stepper->getCurrentPosition();
+    if(currentPos == pos){//maybe another safety clause is needed
+      moveComplete = true;
+    }
+    if(zeroTarget && abs(currentPos) < zeroTol){
+      moveComplete = true;
+    }
+  }
+
+  Serial.println("Stepper Move Complete");
+  if(!zeroTarget){
+    delay(100);
+  }
 }
 
 void printPID(bool bypass = false){
@@ -948,6 +1000,78 @@ void ServoTest(){
   // servoLink2.write(servoLink2_Starting_Angle);
 }
 
+bool correctPosition(double targetPos_Meters, double tolerance_Meters){ //tagget Pos in meters //non blocking function
+  bool ret = true;
+  //convert meters to ticks
+  int encPosTarget = metersToEncTicks(targetPos_Meters);
+  int tol = metersToEncTicks(tolerance_Meters);
+
+  //pull in encoder values
+  int M1_enc = M1_encoderPos;
+  int M2_enc = getM2EncPos();
+
+  //calculate difference from target to real
+  int encM1D = encPosTarget - M1_enc;
+  int encM2D = encPosTarget - M2_enc;
+
+  bool M1Accept = false;
+  bool M2Accept = false;
+
+  //calculate if each enc pos is acceptable
+  if(abs(encM1D-encPosTarget) < tol){
+    M1Accept = true;
+  }
+  if(abs(encM2D-encPosTarget) < tol){
+    M2Accept = true;
+  }
+
+  //find needed direction for each motor (false backwards true forwards)
+  bool dirM1;
+  bool dirM2;
+  if(encM1D > encPosTarget){
+    dirM1 = false;
+  }else{
+    dirM1 = true;
+  }
+  if(encM2D > encPosTarget){
+    dirM2 = false;
+  }else{
+    dirM2 = true;
+  }
+
+  //pulse in the required direction if needed
+  int PWM1 = 0;
+  int PWM2 = 0;
+  int PWMTakeOff = 75;
+  //M1
+  if(!M1Accept){
+    if(dirM1){
+      PWM1 = PWMTakeOff;
+    }else{
+      PWM1 = -PWMTakeOff;
+    }
+  }
+
+  //M2
+  if(!M2Accept){
+    if(dirM2){
+      PWM2 = PWMTakeOff;
+    }else{
+      PWM2 = -PWMTakeOff;
+    }
+  }
+
+  //send to actuate drivetrain
+  if(!M1Accept || !M2Accept){
+    ret = false;
+    actuateDriveTrain(PWM1, PWM2);
+    delay(10); //allow a period
+    actuateDriveTrain(0,0);
+  }
+
+  return ret; //placeholder
+}
+
 void PosPIDCalculation(){
 
   //set Pos PID input to encoder values
@@ -1088,11 +1212,17 @@ void VelPIDCalculation(){
     }
 
     //modify PWM form ENC_PID right at the end so the system has max authority
-    if(Enc_output > 0){
-      M1_PWM_Out += Enc_output;
-    }else{
-      M2_PWM_Out -= Enc_output;
-    }
+    //working code
+    // if(Enc_output > 0){
+    //   M1_PWM_Out += Enc_output;
+    // }else{
+    //   M2_PWM_Out -= Enc_output;
+    // }
+
+    //testing code
+    M1_PWM_Out += Enc_output;
+    M2_PWM_Out -= Enc_output;
+
 
     //send PWM to drivetrain
     if(!robotStopped){
@@ -1121,8 +1251,9 @@ bool posGoalManager(){
   //calculate tolerance based on speed - DATA NOT READY FUTURE CODE
   // int inAvgVel = static_cast<int>((M1_Vel_Save+M2_Vel_Save)/2);
   int inAvgVel = static_cast<int>((M1_Rolling_Avg_Vel+M2_Rolling_Avg_Vel)/2);
-  // Serial.print("Deciding Brake Based on Vel: ");
-  // Serial.println(inAvgVel);
+
+  Serial.print("Deciding Brake Based on Vel: ");
+  Serial.println(inAvgVel);
   if(inAvgVel > 0){
     //positive case
     pos_Tolerance = metersToEncTicks(interpolate(inAvgVel, 3)); //iterpolate using the correct dataset
@@ -1149,15 +1280,23 @@ bool posGoalManager(){
 
   if(abs(Pos_setpoint-avgEnc) < abs(pos_Tolerance)){ // condition for stopping
     if(!robotStopped){
+      //save offset for blocking brake
+      int EncM1M2Offset = M1_encoderPos - getM2EncPos(); //how far M1 is ahead of M2
       Serial.println("Braking!");
       actuateDriveTrain(0,0,true);
-      delay(500);
-      M2_encoderPos = int(M1_encoderPos/0.99); //TEMP SOLUTION
+      delay(250);
+      M2_encoderPos = int(M1_encoderPos/0.99)+EncM1M2Offset; //TEMP SOLUTION
       //for safety
     }
 
     // Serial.println("STOPPED AT TARGET");
     robotStopped = true;
+
+    bool correctPos = false;
+    while(!correctPos){
+      correctPos = correctPosition(posTargetPosition[currentPosGoalIndex], 0.01); //apply 1cm tolerance
+    }
+
     ret = true;
   }else{
     robotStopped = false;
@@ -1530,7 +1669,8 @@ void instructionRegisterManager(){
           break;
 
         case 3:
-          //non-blocking delay
+          //blocking delay
+          delay(instructionRegistry[currentInstructionIndex][1]); //delay time from instruction
           break;
         
         default:
@@ -1565,7 +1705,6 @@ void core0Loop(void * pvParameters) {
   long int prev_Time = micros();
   while (true) {
       // Serial.println("core 0 printing");
-      // delay(100);  // Add some delay to prevent watchdog timeout
       //IMUUpdate();
 
       //velocity calculation
@@ -1592,8 +1731,11 @@ void core0Loop(void * pvParameters) {
 
       }
 
+      // Keep running the stepper control task Seems to be effective
+      vTaskDelay(10 / portTICK_PERIOD_MS);
+
       //stability/not really sure if this is needed
-      delay(1);
+      // delay(1);
   }
 }
 
@@ -1611,7 +1753,7 @@ void setup() {
   Serial.println("LSM6DSOX Found!");
 
   //running to find systematic error
-  IMUerrorCalc();
+  // IMUerrorCalc();
 
   //encoder pin setup#########################
   //M1
@@ -1669,8 +1811,8 @@ void setup() {
     stepper->setAutoEnable(true);
 
     // Set acceleration and speed
-    stepper->setSpeedInHz(3200/2);   // Steps per second 3200
-    stepper->setAcceleration(4800/2); // Steps per second squared 4800
+    stepper->setSpeedInHz(3200);   // Steps per second 3200
+    stepper->setAcceleration(4800); // Steps per second squared 4800
   }
 
   //Servo setup
