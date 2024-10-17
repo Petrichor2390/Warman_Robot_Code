@@ -192,43 +192,43 @@ int armTargetPosition[] = { //example values
 //main instructions
 int currentInstructionIndex = 0;
 bool currentInstructionStarted = false;
-int instructionRegistry[7][2] = {
-//   //test move and arm
-//   {0,1},
-//   {0,1},
+// int instructionRegistry[7][2] = {
+// //   //test move and arm
+// //   {0,1},
+// //   {0,1},
 
-//   //test full movement
-  // {2,0},
-  {1,0},
-  {1,0},
-  {1,0},
-  {3,1000}, //delay
-  {1,0},
-  {1,0},
-  {1,0},
-};
+// //   //test full movement
+//   // {2,0},
+//   {1,0},
+//   {1,0},
+//   {1,0},
+//   {3,1000}, //delay
+//   {1,0},
+//   {1,0},
+//   {1,0},
+// };
 
 //full run example
-// int instructionRegistry[18][2] = {
-//   {0,1}, //short pillar
-//   {0,1}, //tall pillar
-//   {0,1}, //0 pos
-//   {1,0}, // move to ball 3
-//   {0,1}, // RHS ball
-//   {0,1}, //0 pos
-//   {1,0}, // move to ball 4
-//   {0,1}, //LHS ball
-//   {0,1}, //0 pos
-//   {1,0}, //move to hole
-//   {3,1000}, //delay
-//   {1,0}, //move to ball 5
-//   {0,1}, //LHS ball
-//   {0,1}, //zero pos
-//   {1,0}, //move to ball 6
-//   {0,1}, //RHS ball
-//   {0,1}, // zero pos
-//   {1,0}, //move to hole
-// };
+int instructionRegistry[18][2] = {
+  {0,1}, //short pillar
+  {0,1}, //tall pillar
+  {0,1}, //0 pos
+  {1,0}, // move to ball 3
+  {0,1}, // RHS ball
+  {0,1}, //0 pos
+  {1,0}, // move to ball 4
+  {0,1}, //LHS ball
+  {0,1}, //0 pos
+  {1,0}, //move to hole
+  {3,1000}, //delay
+  {1,0}, //move to ball 5
+  {0,1}, //LHS ball
+  {0,1}, //zero pos
+  {1,0}, //move to ball 6
+  {0,1}, //RHS ball
+  {0,1}, // zero pos
+  {1,0}, //move to hole
+};
 
 //instruction registry legend
 //first number
@@ -799,7 +799,7 @@ void armMove(int pos){
     zeroTarget = true;
   }
 
-  int zeroTol = 1;
+  int zeroTol = 700;
 
   stepper->moveTo(pos);
   bool moveComplete = false;
@@ -1819,10 +1819,10 @@ void setup() {
 
   //Servo setup
   //commented out for now to avoid braking the servos
-  servoLink1.attach(SERVO_LINK1_PIN);
-  servoLink2.attach(SERVO_LINK2_PIN);
-  servoLink1.write(servoLink1_Starting_Angle);
-  servoLink2.write(servoLink2_Starting_Angle);
+  // servoLink1.attach(SERVO_LINK1_PIN);
+  // servoLink2.attach(SERVO_LINK2_PIN);
+  // servoLink1.write(servoLink1_Starting_Angle);
+  // servoLink2.write(servoLink2_Starting_Angle);
 
   //Action button setup
   pinMode(ACTION_BUTTON_PIN, INPUT);
