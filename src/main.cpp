@@ -22,6 +22,7 @@ FastAccelStepperEngine engine;
 FastAccelStepper *stepper = NULL;
 
 //SERVOS#########################################################
+//unfold servos
 #define SERVO_LINK1_PIN 39
 #define SERVO_LINK2_PIN 38
 Servo servoLink1;
@@ -38,6 +39,12 @@ int servoLink2_Maintain_Angle = 177;
 
 int servoLink1_startL2_Angle = 40;
 
+//Deposit Servo
+#define SERVO_DEPOSIT_PIN 37
+Servo servoDeposit;
+
+int servoDeposit_Starting_Angle = 180; //test
+int servoDepoist_Finish_Angle = 0;
 
 //encoder variables that carry over through interrupts
 //M1
@@ -139,21 +146,6 @@ int prev_M2_enc_Pos = 0;
 bool posGoalReached = true; //true if the current goal has been reached - starts as true to avoid startup issues
 int currentPosGoalIndex = -1; //-1 for no goal assigned yet, the index of the current goal in the goal list
 bool robotStopped = false;
-// double posTargetPosition[] = {
-//   0.6,
-//   0.1,
-// };
-
-
-//OLD POSITIONS
-// double posTargetPosition[] = {
-//   -0.35-0.005,
-//   -0.45-0.005,
-//   0.20725-0.005,
-//   0.5-0.005,
-//   0.4-0.005,
-//   0.20725-0.005,
-// };
 
 //new positions
 double posTargetPosition[] = {
@@ -165,7 +157,14 @@ double posTargetPosition[] = {
   0.216,
 };
 
-
+double targetTolerance[] = {
+  0.002,
+  0.002,
+  0.010,
+  0.002,
+  0.002,
+  0.010,
+};
 
 //arm positions
 bool armGoalReached = true; //true if the arm goal has been reached - starts as true to avoid startup issues
@@ -180,42 +179,43 @@ int armTargetPosition[] = { //example values
   pillarRHSPos,
   0,
   floorRHS,
-  0,
+  -900,
   floorLHS,
   0,
   floorRHS,
-  0,
+  -900,
   floorLHS,
   0,
+};
+
+int zeroTolArray[] = {
+  400,
+  400,
+  1000,
+  1000,
+  1000,
+  1000,
+  1000,
+  1000,
+  1000,
+  1000,
+  1000,
+  1000,
 };
 
 //main instructions
 int currentInstructionIndex = 0;
 bool currentInstructionStarted = false;
-// int instructionRegistry[7][2] = {
-// //   //test move and arm
-// //   {0,1},
-// //   {0,1},
-
-// //   //test full movement
-//   // {2,0},
-//   {1,0},
-//   {1,0},
-//   {1,0},
-//   {3,1000}, //delay
-//   {1,0},
-//   {1,0},
-//   {1,0},
-// };
 
 //full run example
-int instructionRegistry[18][2] = {
+int instructionRegistry[20][2] = {
+  {2,0},
   {0,1}, //short pillar
   {0,1}, //tall pillar
   {0,1}, //0 pos
   {1,0}, // move to ball 3
   {0,1}, // RHS ball
-  {0,1}, //0 pos
+  {0,1}, //0 pos - modified
   {1,0}, // move to ball 4
   {0,1}, //LHS ball
   {0,1}, //0 pos
@@ -223,11 +223,12 @@ int instructionRegistry[18][2] = {
   {3,1000}, //delay
   {1,0}, //move to ball 5
   {0,1}, //LHS ball
-  {0,1}, //zero pos
+  {0,1}, //zero pos - modified (-900)
   {1,0}, //move to ball 6
   {0,1}, //RHS ball
   {0,1}, // zero pos
   {1,0}, //move to hole
+  {4,0}, //open deposit servo
 };
 
 //instruction registry legend
@@ -235,6 +236,7 @@ int instructionRegistry[18][2] = {
   //1 = move to next position in goal list
   //2 = actuate servos
   //3 = delay
+  //4 = deposit servo
 //second number
   //1 = move arm to next position in goal list
   //if first number is 3 - second number represents delay time
@@ -799,7 +801,8 @@ void armMove(int pos){
     zeroTarget = true;
   }
 
-  int zeroTol = 700;
+  // int zeroTol = 1000;
+  int zeroTol = zeroTolArray[currentArmGoalIndex];
 
   stepper->moveTo(pos);
   bool moveComplete = false;
@@ -816,7 +819,7 @@ void armMove(int pos){
 
   Serial.println("Stepper Move Complete");
   if(!zeroTarget){
-    delay(100);
+    // delay(100);
   }
 }
 
@@ -931,7 +934,6 @@ void ServoTest(){
   //L2 finish at 177
   //L2 maintain at 176
 
-
   //move L1
   // int angleL1;
   // int angleL2;
@@ -1000,6 +1002,11 @@ void ServoTest(){
   // delay(10000);
   // servoLink1.write(servoLink1_Starting_Angle);
   // servoLink2.write(servoLink2_Starting_Angle);
+}
+
+void DepositServo(){
+  //all the function does for now is to move to the final position
+  servoDeposit.write(servoDepoist_Finish_Angle);
 }
 
 bool correctPosition(double targetPos_Meters, double tolerance_Meters){ //tagget Pos in meters //non blocking function
@@ -1286,7 +1293,7 @@ bool posGoalManager(){
       int EncM1M2Offset = M1_encoderPos - getM2EncPos(); //how far M1 is ahead of M2
       Serial.println("Braking!");
       actuateDriveTrain(0,0,true);
-      delay(250);
+      // delay(100); // untested
       M2_encoderPos = int(M1_encoderPos/0.99)+EncM1M2Offset; //TEMP SOLUTION
       //for safety
     }
@@ -1674,6 +1681,11 @@ void instructionRegisterManager(){
           //blocking delay
           delay(instructionRegistry[currentInstructionIndex][1]); //delay time from instruction
           break;
+
+        case 4:
+          //deposit servo
+          DepositServo();
+          break;
         
         default:
           break;
@@ -1754,6 +1766,22 @@ void setup() {
   }
   Serial.println("LSM6DSOX Found!");
 
+  //Stepper setup ###########################
+  // max speed tested 3200, accell 4800
+  engine.init(); //Initialize the engine and set up the GPIOs
+
+  // Attach the stepper to a step_pin
+  stepper = engine.stepperConnectToPin(STEP_PIN, DRIVER_RMT); //DRIVER_RMT paramter added hopefully this reduces the interrupt load
+
+  if (stepper) {
+    stepper->setDirectionPin(DIR_PIN);  // Set the direction pin
+    stepper->setAutoEnable(true);
+
+    // Set acceleration and speed
+    stepper->setSpeedInHz(3200);   // Steps per second 3200
+    stepper->setAcceleration(4800); // Steps per second squared 4800
+  }
+
   //running to find systematic error
   // IMUerrorCalc();
 
@@ -1801,28 +1829,16 @@ void setup() {
   enc_PID.SetOutputLimits(-475, 475);
   enc_PID.SetSampleTime(1);
 
-  //Stepper setup ###########################
-  // max speed tested 3200, accell 4800
-  engine.init(); //Initialize the engine and set up the GPIOs
-
-  // Attach the stepper to a step_pin
-  stepper = engine.stepperConnectToPin(STEP_PIN);
-
-  if (stepper) {
-    stepper->setDirectionPin(DIR_PIN);  // Set the direction pin
-    stepper->setAutoEnable(true);
-
-    // Set acceleration and speed
-    stepper->setSpeedInHz(3200);   // Steps per second 3200
-    stepper->setAcceleration(4800); // Steps per second squared 4800
-  }
-
   //Servo setup
-  //commented out for now to avoid braking the servos
-  // servoLink1.attach(SERVO_LINK1_PIN);
-  // servoLink2.attach(SERVO_LINK2_PIN);
-  // servoLink1.write(servoLink1_Starting_Angle);
-  // servoLink2.write(servoLink2_Starting_Angle);
+  //commented out to avoid braking the servos
+  servoLink1.attach(SERVO_LINK1_PIN);
+  servoLink2.attach(SERVO_LINK2_PIN);
+  servoLink1.write(servoLink1_Starting_Angle);
+  servoLink2.write(servoLink2_Starting_Angle);
+
+  //deposit servo
+  servoDeposit.attach(SERVO_DEPOSIT_PIN);
+  servoDeposit.write(servoDeposit_Starting_Angle);
 
   //Action button setup
   pinMode(ACTION_BUTTON_PIN, INPUT);
@@ -1855,11 +1871,7 @@ void loop() {
     actionButtonWait(false);
   }
 
-  // StepperTest();
   instructionRegisterManager();
-  // brakeTest();
-  // velocityTest();
-  // OffsetTest();
 
 
   loopNo++;
