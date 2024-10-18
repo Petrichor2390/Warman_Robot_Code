@@ -43,8 +43,8 @@ int servoLink1_startL2_Angle = 40;
 #define SERVO_DEPOSIT_PIN 37
 Servo servoDeposit;
 
-int servoDeposit_Starting_Angle = 180; //test
-int servoDepoist_Finish_Angle = 0;
+int servoDeposit_Starting_Angle = 90; //45
+int servoDepoist_Finish_Angle = 50;
 
 //encoder variables that carry over through interrupts
 //M1
@@ -115,7 +115,7 @@ bool roll_Avg_Filled = false;
 //Position PID################################################################# 
 //input = position from encoders, output = setpoint for Velocity PID (range from -300 to 300), setpoint = targets on the track
 double Pos_input, Pos_output, Pos_setpoint;
-double Pos_Kp = 0.11, Pos_Ki = 0, Pos_Kd = 0.0; //p = 0.22 //d= 0.02
+double Pos_Kp = 0.11, Pos_Ki = 0, Pos_Kd = 0.0; //p = 0.11 //d= 0.02
 
 PID pos_PID(&Pos_input, &Pos_output, &Pos_setpoint, Pos_Kp, Pos_Ki, Pos_Kd, DIRECT);
 
@@ -151,7 +151,6 @@ bool robotStopped = false;
 double posTargetPosition[] = {
   -0.34,
   -0.451,
-  0.216,
   0.509,
   0.386,
   0.216,
@@ -160,10 +159,9 @@ double posTargetPosition[] = {
 double targetTolerance[] = {
   0.002,
   0.002,
-  0.010,
   0.002,
   0.002,
-  0.010,
+  0.005,
 };
 
 //arm positions
@@ -179,18 +177,18 @@ int armTargetPosition[] = { //example values
   pillarRHSPos,
   0,
   floorRHS,
-  -900,
+  -700,
   floorLHS,
   0,
   floorRHS,
-  -900,
+  -700,
   floorLHS,
   0,
 };
 
 int zeroTolArray[] = {
   400,
-  400,
+  800,
   1000,
   1000,
   1000,
@@ -208,7 +206,7 @@ int currentInstructionIndex = 0;
 bool currentInstructionStarted = false;
 
 //full run example
-int instructionRegistry[20][2] = {
+int instructionRegistry[18][2] = {
   {2,0},
   {0,1}, //short pillar
   {0,1}, //tall pillar
@@ -219,16 +217,14 @@ int instructionRegistry[20][2] = {
   {1,0}, // move to ball 4
   {0,1}, //LHS ball
   {0,1}, //0 pos
-  {1,0}, //move to hole
-  {3,1000}, //delay
   {1,0}, //move to ball 5
   {0,1}, //LHS ball
   {0,1}, //zero pos - modified (-900)
   {1,0}, //move to ball 6
   {0,1}, //RHS ball
   {0,1}, // zero pos
-  {1,0}, //move to hole
   {4,0}, //open deposit servo
+  {1,0}, //move to hole
 };
 
 //instruction registry legend
@@ -981,7 +977,6 @@ void ServoTest(){
       servoLink2.write(angleL2);
     }
 
-
     //condition for if servo's have reached their positions
     if(angleL1 <= servoLink1_Finish_Angle){
       L1_Reached = true;
@@ -993,15 +988,6 @@ void ServoTest(){
     delayMicroseconds(3300); //equal to delay(3.3)
     loopCount++;
   }
-
-
-
-  // servoLink1.write(servoLink1_Maintain_Angle);
-  // servoLink2.write(servoLink2_Maintain_Angle);
-
-  // delay(10000);
-  // servoLink1.write(servoLink1_Starting_Angle);
-  // servoLink2.write(servoLink2_Starting_Angle);
 }
 
 void DepositServo(){
@@ -1051,7 +1037,7 @@ bool correctPosition(double targetPos_Meters, double tolerance_Meters){ //tagget
   //pulse in the required direction if needed
   int PWM1 = 0;
   int PWM2 = 0;
-  int PWMTakeOff = 75;
+  int PWMTakeOff = 90;
   //M1
   if(!M1Accept){
     if(dirM1){
