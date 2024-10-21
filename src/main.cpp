@@ -1743,14 +1743,14 @@ void setup() {
   Serial.begin(115200);
 
   //IMU SETUP ########################
-  Wire.begin(SDA_PIN, SCL_PIN);
-  // Initialize I2C
-  while(!sox.begin_I2C(0x6A)){
-  Serial.println("Failed to find LSM6DSOX chip");
-  delay(10);
-  // while (1);
-  }
-  Serial.println("LSM6DSOX Found!");
+  // Wire.begin(SDA_PIN, SCL_PIN);
+  // // Initialize I2C
+  // while(!sox.begin_I2C(0x6A)){
+  // Serial.println("Failed to find LSM6DSOX chip");
+  // delay(10);
+  // // while (1);
+  // }
+  // Serial.println("LSM6DSOX Found!");
 
   //Stepper setup ###########################
   // max speed tested 3200, accell 4800
