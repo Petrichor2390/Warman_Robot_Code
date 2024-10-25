@@ -189,16 +189,16 @@ int armTargetPosition[] = { //example values
 int zeroTolArray[] = {
   400,
   800,
-  1000,
-  1000,
-  1000,
-  1000,
-  1000,
-  1000,
-  1000,
-  1000,
-  1000,
-  1000,
+  700,
+  700,
+  700,
+  700,
+  700,
+  700,
+  700,
+  700,
+  700,
+  700,
 };
 
 //main instructions
@@ -1757,7 +1757,7 @@ void setup() {
   engine.init(); //Initialize the engine and set up the GPIOs
 
   // Attach the stepper to a step_pin
-  stepper = engine.stepperConnectToPin(STEP_PIN, DRIVER_RMT); //DRIVER_RMT paramter added hopefully this reduces the interrupt load
+  stepper = engine.stepperConnectToPin(STEP_PIN); //DRIVER_RMT paramter added hopefully this reduces the interrupt load
 
   if (stepper) {
     stepper->setDirectionPin(DIR_PIN);  // Set the direction pin
